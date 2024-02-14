@@ -13,11 +13,11 @@ QuantumultX 本地脚本配置:
 
 [task_local]
 # ikuuu签到
-0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult/ikuuu/ikuuu.js
+0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/ikuuu/ikuuu.js
 
 [rewrite_local]
 # 获取Cookie
-https:\/\/ikuuu\.me\/user\/profile url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult/ikuuu/ikuuu.js
+https:\/\/ikuuu\.me\/user\/profile url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/ikuuu/ikuuu.js
 
 [mitm] 
 hostname = ikuuu.me
