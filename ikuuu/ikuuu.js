@@ -185,4 +185,4 @@ function checkin() {
     })
 }
 
-$hammer.isRequest ? GetCookie() : checkin();
+
