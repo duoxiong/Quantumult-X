@@ -1,4 +1,4 @@
-// Quantumult X引用地址： https://raw.githubusercontent.com/czy13724/Quantumult-X/main/scripts/CerealTrans.js
+// Quantumult X引用地址： https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/rewrite/CerealTrans.js
 // Surge/Shadowrocket 模块地址： https://raw.githubusercontent.com/czy13724/Quantumult-X/main/Surge/CerealTrans.sgmodule
 // Loon 插件地址： https://raw.githubusercontent.com/czy13724/Quantumult-X/main/Loon/CerealTrans.plugin
 // Stash 覆写地址： https://raw.githubusercontent.com/czy13724/Quantumult-X/main/Stash/CerealTrans.stoverride
@@ -10,7 +10,7 @@
 下载地址：https://apps.apple.com/app/id6466264767
 
 [rewrite_local]
-^https:\/\/youxifanyizhushou\.com\/ios\/api\/product\/user\/remain\/ios$ url script-response-body https://raw.githubusercontent.com/czy13724/Quantumult-X/main/scripts/CerealTrans.js
+^https:\/\/youxifanyizhushou\.com\/ios\/api\/product\/user\/remain\/ios$ url script-response-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/rewrite/CerealTrans.js
 
 [mitm]
 hostname = youxifanyizhushou.com
