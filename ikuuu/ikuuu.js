@@ -17,10 +17,10 @@ QuantumultX 本地脚本配置:
 
 [rewrite_local]
 # 获取Cookie
-https:\/\/ikuuu\.me\/user\/profile url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/ikuuu/ikuuu.js
+https:\/\/ikuuu\.pw\/user\/profile url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/ikuuu/ikuuu.js
 
 [mitm] 
-hostname = ikuuu.me
+hostname = ikuuu.pw
 
 **/
 
