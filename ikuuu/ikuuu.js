@@ -153,13 +153,13 @@ function checkin() {
         $hammer.alert(Protagonist, "cookie没有，先去获取吧!");
         return $hammer.done();
     }
-    const host = `https://ikuuu.me`;
+    const host = `https://ikuuu.pw`;
     let options = {
         url: `${host}/user/checkin`,
         headers: {
             "accept": "application/json, text/javascript, */*; q=0.01",
-            "origin": "https://ikuuu.me",
-            "referer": "https://ikuuu.me/user",
+            "origin": "https://ikuuu.pw",
+            "referer": "https://ikuuu.pw/user",
             "cookie": cookie,
             "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1",
         }
