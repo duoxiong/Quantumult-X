@@ -17,7 +17,7 @@ QuantumultX 本地脚本配置:
 
 [rewrite_local]
 # 获取Cookie
-https:\/\/ikuuu\.pw\/user\/profile url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/ikuuu/ikuuu.js
+https:\/\/ikuuu\.one\/user\/profile url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/main/ikuuu/ikuuu.js
 
 [mitm] 
 hostname = ikuuu.pw
@@ -153,13 +153,13 @@ function checkin() {
         $hammer.alert(Protagonist, "cookie没有，先去获取吧!");
         return $hammer.done();
     }
-    const host = `https://ikuuu.pw`;
+    const host = `https://ikuuu.one`;
     let options = {
         url: `${host}/user/checkin`,
         headers: {
             "accept": "application/json, text/javascript, */*; q=0.01",
-            "origin": "https://ikuuu.pw",
-            "referer": "https://ikuuu.pw/user",
+            "origin": "https://ikuuu.one",
+            "referer": "https://ikuuu.one/user",
             "cookie": cookie,
             "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1",
         }
