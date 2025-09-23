@@ -1,8 +1,4 @@
-/*
- * 中国电信 Cookie 获取脚本（Surge / QX / Loon 通用）
- * 抓取 e.dlife.cn / open.e.189.cn/api 请求头里的 Cookie
- * 自动写入 $prefs（BoxJS 可直接读取）
- */
+
 
 const KEY = "ChinaTelecomCookie";
 
