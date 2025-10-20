@@ -1,0 +1,15 @@
+#!name=中国电信 Cookie 自动保持有效
+#!desc=自动抓取、更新并展示 Cookie 状态（支持 BoxJS 可视化查看）
+#!author=熊先生定制
+#!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/ChinaTelecom.png
+
+[rewrite_local]
+# ✅ 自动抓取 Cookie
+^https:\/\/(e\.dlife\.cn|open\.e\.189\.cn)\/api\/?.* url script-request-header ChinaTelecom.cookie.js
+
+[task_local]
+# ⏰ 定时检测 Cookie 是否有效（每天 9:00、15:00、21:00）
+0 9,15,21 * * * ChinaTelecom.check.js, tag=检查中国电信Cookie, enabled=true
+
+[mitm]
+hostname = e.dlife.cn, open.e.189.cn
