@@ -1,31 +1,28 @@
-
+/*
+ * 中国电信 Cookie 获取脚本
+ * Quantumult X / Surge / Loon 通用
+ * 自动写入 $prefs，可在 BoxJS 中查看
+ */
 
 const KEY = "ChinaTelecomCookie";
 
 !(async () => {
   if (typeof $request !== "undefined") {
-    const url = $request.url;
-    const method = $request.method;
-    const headers = $request.headers || {};
-    const cookie = headers["Cookie"] || headers["cookie"];
-
-    let log = `🔍 [中国电信调试]
-URL: ${url}
-Method: ${method}
-Headers:\n${JSON.stringify(headers, null, 2)}\n`;
-
-    if ($request.body) {
-      log += `Body:\n${$request.body}\n`;
-    }
-    console.log(log);
-
-    if (cookie && (cookie.includes("SSON") || cookie.includes("JSESSIONID"))) {
-      $prefs.setValueForKey(cookie, KEY);
-      $notify("中国电信", "✅ Cookie 获取成功", cookie);
-      console.log("✅ Cookie 已保存到 BoxJS");
+    const cookie = $request.headers["Cookie"] || $request.headers["cookie"];
+    if (cookie) {
+      const oldCookie = $prefs.valueForKey(KEY);
+      if (oldCookie !== cookie) {
+        $prefs.setValueForKey(cookie, KEY);
+        $prefs.setValueForKey(new Date().toLocaleString(), `${KEY}_update`);
+        $notify("✅ 中国电信 Cookie 获取成功", "", "已写入 BoxJS，可查看状态");
+      } else {
+        $notify("ℹ️ Cookie 未变化", "", "无需更新");
+      }
     } else {
-      $notify("中国电信", "⚠️ 未发现 Cookie", url);
+      $notify("❌ 获取失败", "", "未捕获到 Cookie");
     }
+    $done({});
+  } else {
+    $done({});
   }
-  $done({});
 })();
