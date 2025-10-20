@@ -1,4 +1,3 @@
-
 /*
  * 中国电信 Cookie 获取脚本
  * Quantumult X / Surge / Loon 通用
