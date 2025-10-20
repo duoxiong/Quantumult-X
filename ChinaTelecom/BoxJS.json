@@ -1,0 +1,37 @@
+{
+  "id": "ChinaTelecom",
+  "name": "中国电信 Cookie 管理",
+  "author": "生成包",
+  "descs_html": [
+    "自动抓取、更新并展示当前 Cookie 状态。",
+    "Cookie 用于 Scriptable / 小组件 等自动化任务。"
+  ],
+  "keys": [
+    "ChinaTelecomCookie",
+    "ChinaTelecomCookie_update",
+    "ChinaTelecomLoginUrl"
+  ],
+  "settings": [
+    {
+      "id": "ChinaTelecomCookie",
+      "name": "当前 Cookie",
+      "val": "",
+      "type": "textarea",
+      "desc": "自动捕获的 Cookie 内容（含 SSON）"
+    },
+    {
+      "id": "ChinaTelecomCookie_update",
+      "name": "最后更新时间",
+      "val": "",
+      "type": "text",
+      "desc": "最近一次成功更新时间"
+    },
+    {
+      "id": "ChinaTeleComLoginUrl",
+      "name": "登录跳转地址 (可选)",
+      "val": "",
+      "type": "text",
+      "desc": "可选：保存 loginUrl 以便任务尝试触发刷新（不要公开）"
+    }
+  ]
+}
