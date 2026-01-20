@@ -11,15 +11,15 @@ hostname = app-api.gwm.com.cn, gateway.gwm.com.cn
 
 [rewrite_local]
 
-# 方案1: 拦截用户信息接口 (优先级最高)
+
 
 ^https://app-api.gwm.com.cn/app/v1/user/info url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
-# 方案2: 拦截登录接口 (备选)
+
 
 ^https://app-api.gwm.com.cn/app/v1/user/login url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
-# 方案3: 拦截首页接口 (备选)
+
 
 ^https://app-api.gwm.com.cn/app/v1/home url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
