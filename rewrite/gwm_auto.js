@@ -1,12 +1,12 @@
 /*
-脚本名称：长城汽车自动签到 (QuanX 专版)
+脚本名称：长城汽车自动签到 (2025新域名修复版)
 更新时间：2024-05-20
-说明：剔除冗余代码，仅针对 Quantumult X 优化
+说明：针对 gwmapp-h.com 等新域名优化，仅限 Quantumult X 使用
 仓库路径：https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
 [rewrite_local]
-# 匹配 v1, v2, v3 等任意版本接口
-^https:\/\/app-api\.gwm\.com\.cn\/app\/v.*?\/user\/info url script-response-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
+# 核心修复：匹配 gwmapp-h / gwmcloudcn / haval / tank 等所有可能的新域名
+^https?:\/\/.*(gwmapp-h|gwmcloudcn|gwm|haval|tank).*\.com.*\/.*user\/info url script-response-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
 [task_local]
 15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, enabled=true
@@ -14,9 +14,8 @@
 
 const scriptName = "长城汽车签到";
 const tokenKey = "gwm_token";
-const debug = false; // 需要调试日志请改为 true
 
-// ================= 主逻辑 =================
+// ================= 主逻辑入口 =================
 const $ = initQuanX();
 
 (async () => {
@@ -32,30 +31,36 @@ const $ = initQuanX();
     $.done();
 })();
 
-// ================= 功能函数 =================
+// ================= 核心功能函数 =================
 
-// 核心：抓取 Token
+// 1. 抓取 Token (支持请求头和响应体双重检测)
 async function captureToken() {
-    console.log(`🔔 [${scriptName}] 开始捕获 Token...`);
+    console.log(`🔔 [${scriptName}] 捕获触发 URL: ${$request.url}`);
     let capturedToken = null;
     let userName = "";
 
     try {
-        // 1. 尝试从响应体获取 (最准确)
+        // A. 优先尝试从响应体获取 (准确率最高)
         if ($response.body) {
-            const body = JSON.parse($response.body);
-            if (body.data && body.data.token) {
-                capturedToken = body.data.token;
-                console.log("✅ 从响应体获取到 Token");
-            }
-            if (body.data && (body.data.userName || body.data.nickName)) {
-                userName = body.data.userName || body.data.nickName;
+            try {
+                const body = JSON.parse($response.body);
+                // 适配不同接口返回结构
+                if (body.data && body.data.token) {
+                    capturedToken = body.data.token;
+                    console.log("✅ [Body] 成功提取 Token");
+                }
+                // 顺便提取用户名
+                if (body.data) {
+                    userName = body.data.userName || body.data.nickName || body.data.name || "";
+                }
+            } catch (e) {
+                // 忽略非 JSON 响应
             }
         }
 
-        // 2. 尝试从请求头获取 (备用)
+        // B. 备用尝试从请求头获取
         if (!capturedToken && $request.headers) {
-            // 兼容 header key 大小写
+            // 兼容 header key 大小写 (Authorization / token / x-token)
             const headers = Object.keys($request.headers).reduce((acc, key) => {
                 acc[key.toLowerCase()] = $request.headers[key];
                 return acc;
@@ -63,76 +68,84 @@ async function captureToken() {
             
             const keys = ['authorization', 'token', 'x-token', 'gwm-token'];
             for (let key of keys) {
-                if (headers[key]) {
+                if (headers[key] && headers[key].length > 20) { // 简单过滤过短的无效值
                     capturedToken = headers[key];
-                    console.log(`✅ 从 Header[${key}] 获取到 Token`);
+                    console.log(`✅ [Header] 成功提取 Token (${key})`);
                     break;
                 }
             }
         }
 
-        // 3. 保存逻辑
+        // C. 保存逻辑
         if (capturedToken) {
             const oldToken = $.read(tokenKey);
             if (capturedToken !== oldToken) {
-                $.write(capturedToken, tokenKey);
-                $.notify(scriptName, "🎉 Token 获取成功", `用户: ${userName || '未知'}\n已保存并准备签到`);
-                console.log(`Token 更新成功: ${capturedToken.substring(0, 10)}...`);
+                const saveResult = $.write(capturedToken, tokenKey);
+                if (saveResult) {
+                    $.notify(scriptName, "🎉 Token 获取成功", `用户: ${userName || '车主'}\n数据已更新，下次任务生效`);
+                    console.log(`🎉 Token 更新成功: ${capturedToken.substring(0, 15)}...`);
+                } else {
+                    console.log("❌ Token 写入失败 (存储空间满或权限不足)");
+                }
             } else {
-                console.log("ℹ️ Token 未变化，跳过保存");
+                console.log("ℹ️ Token 未发生变化，跳过通知");
             }
         } else {
-            console.log("❌ 未能提取到有效 Token");
+            console.log("⚠️ 本次请求未发现有效 Token (可能是登录失效或接口结构变更)");
         }
     } catch (e) {
-        console.log(`❌ 捕获出错: ${e}`);
+        console.log(`❌ 捕获逻辑异常: ${e}`);
     }
 }
 
-// 核心：执行任务
+// 2. 执行签到任务
 async function runTask() {
     const rawTokens = $.read(tokenKey);
     if (!rawTokens) {
-        $.notify(scriptName, "❌ 无法执行", "请先去 App 点击“我的”页面获取 Token");
+        $.notify(scriptName, "❌ 无法执行", "请先打开 APP -> 点击“我的”页面，等待脚本自动抓取 Token");
+        console.log("❌ 无 Token 数据");
         return;
     }
 
-    const tokens = rawTokens.split('@').filter(t => t.length > 5);
-    console.log(`检测到 ${tokens.length} 个账号`);
+    // 支持多账号 (虽然目前逻辑主要针对单账号覆盖)
+    const tokens = rawTokens.split('@').filter(t => t.length > 10);
+    console.log(`✅ 检测到 ${tokens.length} 个 Token`);
 
     let message = [];
     
     for (let i = 0; i < tokens.length; i++) {
-        console.log(`\n➤ 开始执行账号 ${i + 1}`);
         const currentToken = tokens[i];
+        console.log(`\n➤ 执行第 ${i + 1} 个账号`);
         
-        // 1. 查询用户信息
+        // 查询信息
         const user = await getUserInfo(currentToken);
-        let log = `账号: ${user.name}`;
+        let logStr = `账号: ${user.name}`;
         
-        // 2. 执行签到
+        // 执行签到
         if (user.valid) {
             const signRes = await signIn(currentToken);
-            log += ` | 结果: ${signRes}`;
+            logStr += `\n结果: ${signRes}`;
         } else {
-            log += ` | 状态: ❌ Token 失效`;
+            logStr += `\n状态: ❌ Token 已失效，请重新获取`;
         }
         
-        console.log(log);
-        message.push(log);
+        console.log(logStr);
+        message.push(logStr);
         
-        // 随机延迟 2-4 秒防封
+        // 随机延迟防止风控
         if (i < tokens.length - 1) await $.wait(Math.floor(Math.random() * 2000 + 2000));
     }
     
     if (message.length > 0) {
-        $.notify(scriptName, "签到执行完毕", message.join("\n"));
+        $.notify(scriptName, "签到执行完毕", message.join("\n\n"));
     }
 }
 
-// 接口：用户信息
+// ================= API 接口请求 =================
+
 function getUserInfo(token) {
     return new Promise(resolve => {
+        // 尝试使用 v1 接口，如果未来变动可修改此处
         const url = {
             url: "https://app-api.gwm.com.cn/app/v1/user/info",
             headers: {
@@ -149,7 +162,7 @@ function getUserInfo(token) {
                         name: body.data.userName || body.data.nickName || hidePhone(body.data.mobile) 
                     });
                 } else {
-                    resolve({ valid: false, name: "未知" });
+                    resolve({ valid: false, name: "未知/失效" });
                 }
             } catch (e) {
                 resolve({ valid: false, name: "解析失败" });
@@ -158,7 +171,6 @@ function getUserInfo(token) {
     });
 }
 
-// 接口：签到
 function signIn(token) {
     return new Promise(resolve => {
         const url = {
@@ -176,32 +188,34 @@ function signIn(token) {
                 const body = JSON.parse(response.body);
                 if (body.code === 200 || body.success) {
                     const points = body.data?.points || body.data?.reward || 0;
-                    resolve(`✅ 成功 (+${points}分)`);
+                    const msg = body.data?.message || "";
+                    resolve(`✅ 成功 (+${points}分) ${msg}`);
                 } else if (JSON.stringify(body).includes("重复")) {
-                    resolve(`⚠️ 今日已签`);
+                    resolve(`⚠️ 今日已签过`);
                 } else {
-                    resolve(`❌ ${body.message || "失败"}`);
+                    resolve(`❌ ${body.message || "未知错误"}`);
                 }
             } catch (e) {
-                resolve(`❌ 异常`);
+                resolve(`❌ 响应解析异常`);
             }
-        }, () => resolve(`❌ 网络错误`));
+        }, () => resolve(`❌ 网络请求失败`));
     });
 }
 
+// 辅助：手机号脱敏
 function hidePhone(str) {
     if (!str || str.length < 7) return "车主";
     return str.substring(0, 3) + "****" + str.substring(str.length - 4);
 }
 
-// ================= QuanX 原生工具库 (极简版) =================
+// ================= Quantumult X 原生工具库 (极简版) =================
 function initQuanX() {
     return {
         read: (key) => $prefs.valueForKey(key),
         write: (val, key) => $prefs.setValueForKey(val, key),
         notify: (title, subtitle, msg) => $notify(title, subtitle, msg),
         get: (url) => $task.fetch({ ...url, method: 'GET' }),
-        fetch: (url) => $task.fetch(url), // 通用 fetch
+        fetch: (url) => $task.fetch(url),
         wait: (ms) => new Promise(r => setTimeout(r, ms)),
         done: (val) => $done(val)
     };
