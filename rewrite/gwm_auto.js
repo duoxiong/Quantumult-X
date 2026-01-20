@@ -13,11 +13,11 @@ hostname = app-api.gwm.com.cn, gateway.gwm.com.cn
 
 [rewrite_local]
 # 抓取 Token (打开 APP 点击"我的"页面触发)
-^https:\/\/(app-api|gateway)\.gwm\.com\.cn\/.*\/user\/info url script-request-header https://raw.githubusercontent.com/你的用户名/仓库/main/gwm_auto.js
+^https:\/\/(app-api|gateway)\.gwm\.com\.cn\/.*\/user\/info url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
 [task_local]
 # 每日 09:00 自动签到
-0 9 * * * https://raw.githubusercontent.com/你的用户名/仓库/main/gwm_auto.js, tag=长城汽车签到, enabled=true
+0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, enabled=true
 
 */
 
