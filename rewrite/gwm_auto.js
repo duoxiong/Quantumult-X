@@ -10,27 +10,27 @@
 hostname = %APPEND% app-api.gwm.com.cn
 
 [Script]
-获取长城汽车Token = type=http-response, pattern=^https://app-api.gwm.com.cn/app/v1/user/info, requires-body=1, max-size=0, script-path=https://raw.githubusercontent.com/user/repo/gwm_sign.js
+获取长城汽车Token = type=http-response, pattern=^https://app-api.gwm.com.cn/app/v1/user/info, requires-body=1, max-size=0, script-path=https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
-长城汽车签到 = type=cron, cronexp=15 9 * * *, timeout=60, script-path=https://raw.githubusercontent.com/user/repo/gwm_sign.js, script-update-interval=0
+长城汽车签到 = type=cron, cronexp=15 9 * * *, timeout=60, script-path=https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, script-update-interval=0
 
 ============ Quantumult X 配置 =============
 [MITM]
 hostname = app-api.gwm.com.cn
 
 [rewrite_local]
-^https://app-api.gwm.com.cn/app/v1/user/info url script-response-body https://raw.githubusercontent.com/user/repo/gwm_sign.js
+^https://app-api.gwm.com.cn/app/v1/user/info url script-response-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
 [task_local]
-15 9 * * * https://raw.githubusercontent.com/user/repo/gwm_sign.js, tag=长城汽车签到, enabled=true
+15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, enabled=true
 
 ============ Loon 配置 ================
 [MITM]
 hostname = app-api.gwm.com.cn
 
-cron “15 9 * * *” script-path=https://raw.githubusercontent.com/user/repo/gwm_sign.js, tag=长城汽车签到
+cron “15 9 * * *” script-path=https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到
 
-http-response ^https://app-api.gwm.com.cn/app/v1/user/info script-path=https://raw.githubusercontent.com/user/repo/gwm_sign.js, requires-body=true, timeout=10
+http-response ^https://app-api.gwm.com.cn/app/v1/user/info script-path=https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, requires-body=true, timeout=10
 
 */
 
@@ -38,10 +38,11 @@ http-response ^https://app-api.gwm.com.cn/app/v1/user/info script-path=https://r
 const $ = new Env(‘长城汽车签到’);
 const origin = ‘https://app-api.gwm.com.cn’;
 const GWM_TOKEN_KEY = ‘gwm_token’;
+const GWM_USER_KEY = ‘gwm_user_info’;
 const Notify = 1;  // 0 关闭通知，1 打开通知
 $.messages = [];
 
-// ==================== 变量区域 ====================
+// ==================== 变量初始化 ====================
 $.is_debug = ($.isNode() ? process.env.IS_DEBUG : $.getdata(‘is_debug’)) || ‘false’;
 let token = ($.isNode() ? process.env.gwm_token : $.getdata(GWM_TOKEN_KEY)) || ‘’;
 let tokenArr = [];
@@ -55,25 +56,32 @@ const Api = {
 “userInfo”: {
 “url”: “/app/v1/user/info”,
 “method”: “GET”
+},
+“signStatus”: {
+“url”: “/app/v1/activity/sign_status”,
+“method”: “GET”
 }
 }
 
-// ==================== 主程序 ====================
+// ==================== 主程序入口 ====================
 !(async () => {
 try {
-// 检查是否为获取Token的请求
+// 检查是否为请求拦截（获取Token）
 if (typeof $request !== ‘undefined’) {
-GetToken();
+console.log(‘🔔 [检测] 捕获到网络请求，开始提取Token…’);
+await GetToken();
 return;
 }
 
 ```
-// 检查变量
+console.log(`\n========== ${$.name} 开始执行 ==========\n`);
+
+// 检查环境变量
 await checkEnv();
 
-// 未检测到账号变量，退出
+// 未检测到Token，退出
 if (!tokenArr[0]) {
-  throw new Error('❌ 未获取到Token，请打开长城汽车APP的"我的"页面');
+  throw new Error('❌ 未获取到Token\n\n【获取步骤】\n1. 打开长城/坦克汽车APP\n2. 进入"我的"页面\n3. 等待脚本自动抓取Token\n\n如仍未出现，请检查:\n- MITM主机名是否正确\n- rewrite规则是否启用');
 }
 
 // 执行签到任务
@@ -81,67 +89,97 @@ await main();
 ```
 
 } catch (e) {
-$.messages.push(e.message || e);
-console.log(e);
+$.messages.push(e.message || String(e));
+console.log(`\n❌ 错误: ${e}`);
 } finally {
 await sendMsg($.messages.join(’\n’));
 $.done();
 }
 })();
 
-// ==================== 获取Token ====================
-function GetToken() {
+// ==================== 获取并保存Token ====================
+async function GetToken() {
 try {
-if ($request && $request.headers) {
-// 从响应头中提取Authorization
-let tokenVal = $request.headers[‘Authorization’] ||
-$request.headers[‘authorization’] ||
-$request.headers[‘token’] ||
-$request.headers[‘Token’];
+let tokenVal = ‘’;
+let userInfo = {};
 
 ```
-  if (tokenVal && tokenVal.length > 20) {
-    let oldToken = $.getdata(GWM_TOKEN_KEY);
-    if (oldToken !== tokenVal) {
-      $.setdata(tokenVal, GWM_TOKEN_KEY);
-      console.log(`✅ Token已保存: ${tokenVal.substring(0, 20)}...`);
-      $.messages.push(`🎉 Token获取成功`);
+// 【方案1】从请求头中提取Token
+if ($request && $request.headers) {
+  const headers = $request.headers;
+  const authKeys = ['Authorization', 'authorization', 'token', 'Token', 'x-token', 'X-Token'];
+  
+  for (let key of authKeys) {
+    if (headers[key]) {
+      tokenVal = headers[key];
+      console.log(`✅ [Header] 在 "${key}" 中发现Token`);
+      break;
     }
   }
 }
 
-// 也尝试从响应体提取Token
+// 【方案2】从响应体中提取Token和用户信息
 if ($response && $response.body) {
-  let body = {};
   try {
-    body = JSON.parse($response.body);
-  } catch (e) {
-    console.log('响应体解析失败');
-  }
+    let body = JSON.parse($response.body);
+    
+    // 提取用户信息
+    if (body.data && body.data.userId) {
+      userInfo = {
+        userId: body.data.userId,
+        mobile: body.data.mobile || body.data.phone || '',
+        userName: body.data.userName || body.data.name || ''
+      };
+    }
 
-  if (body.data && body.data.token) {
-    $.setdata(body.data.token, GWM_TOKEN_KEY);
-    console.log(`✅ Token已保存（来自响应体）`);
+    // 从响应体提取Token
+    if (body.data && body.data.token && !tokenVal) {
+      tokenVal = body.data.token;
+      console.log(`✅ [Body] 在响应体中发现Token`);
+    }
+  } catch (e) {
+    console.log(`⚠️ 响应体解析失败: ${e}`);
   }
+}
+
+// 【保存Token】
+if (tokenVal && tokenVal.length > 20) {
+  let oldToken = $.getdata(GWM_TOKEN_KEY);
+  
+  if (oldToken !== tokenVal) {
+    $.setdata(tokenVal, GWM_TOKEN_KEY);
+    
+    // 保存用户信息
+    if (Object.keys(userInfo).length > 0) {
+      $.setdata(JSON.stringify(userInfo), GWM_USER_KEY);
+      console.log(`✅ 用户信息已保存`);
+    }
+
+    console.log(`✅ Token已保存: ${tokenVal.substring(0, 20)}...`);
+    $.msg('长城汽车签到', '🎉 Token获取成功', `已保存用于签到`);
+  } else {
+    console.log(`ℹ️ Token未变化，跳过保存`);
+  }
+} else {
+  console.log(`⚠️ 未能提取有效Token`);
 }
 ```
 
 } catch (e) {
-console.log(`获取Token异常: ${e}`);
+console.log(`❌ GetToken异常: ${e}`);
 }
 }
 
 // ==================== 主执行函数 ====================
 async function main() {
 for (let i = 0; i < tokenArr.length; i++) {
-console.log(`\n账号[${i + 1}]开始执行`);
+console.log(`\n➤ 【账号 ${i + 1}/${tokenArr.length}】开始执行\n`);
 
 ```
 // 变量初始化
 $.message = '';
 $.result = '';
-$.userMobile = '未知';
-$.integralBalance = 0;
+$.userInfo = {};
 $.currentToken = tokenArr[i];
 
 // 获取用户信息
@@ -151,11 +189,12 @@ await getUserInfo();
 await signIn();
 
 // 拼接通知消息
-$.messages.push(`${$.result.replace(/\n$/, '')}`);
-$.messages.push(`账号: ${hideSensitiveData($.userMobile, 3, 4)}`);
+if ($.result) {
+  $.messages.push(`${$.result.replace(/\n$/, '')}`);
+}
 
 // 账号间隔3秒
-await $.wait(1000 * 3);
+await $.wait(3000);
 ```
 
 }
@@ -163,52 +202,92 @@ await $.wait(1000 * 3);
 
 // ==================== 签到函数 ====================
 async function signIn() {
+try {
 let result = await httpRequest(
 options(Api.signIn.url, JSON.stringify({}), Api.signIn.method)
 );
 
-debug(result, “signIn”);
+```
+debug(result, "signIn");
 
-if (result && result.code === 200) {
-$.result += `✅ 签到成功\n`;
-if (result.data) {
-$.result += `获得积分: ${result.data.points || result.data.reward || '未知'}\n`;
+if (!result) {
+  $.result += `❌ 网络请求失败\n`;
+  return;
 }
-} else if (result && result.code === 1001) {
-$.result += `⚠️ 今日已签到\n`;
-} else if (result && (result.code === 401 || result.code === 403)) {
-$.result += `❌ Token失效，请重新打开APP\n`;
+
+if (result.code === 200 || result.success === true) {
+  $.result += `✅ 签到成功\n`;
+  
+  if (result.data) {
+    const points = result.data.points || result.data.reward || result.data.integralValue || 0;
+    const message = result.data.message || result.message || '';
+    
+    $.result += `获得积分: ${points} 分\n`;
+    if (message) $.result += `${message}\n`;
+  }
+} else if (result.code === 1001 || (result.message && result.message.includes('重复'))) {
+  $.result += `⚠️ 今日已签到\n`;
+  if (result.message) $.result += `${result.message}\n`;
+} else if (result.code === 401 || result.code === 403) {
+  $.result += `❌ Token失效\n`;
+  $.result += `请重新打开APP获取Token\n`;
 } else {
-$.result += `❌ 签到失败: ${result?.message || '未知错误'}\n`;
+  $.result += `❌ 签到失败\n`;
+  $.result += `错误: ${result.message || result.code || '未知错误'}\n`;
+}
+```
+
+} catch (e) {
+$.result += `❌ 签到异常: ${e}\n`;
 }
 }
 
 // ==================== 获取用户信息 ====================
 async function getUserInfo() {
+try {
 let result = await httpRequest(
 options(Api.userInfo.url, ‘’, Api.userInfo.method)
 );
 
-debug(result, “getUserInfo”);
+```
+debug(result, "getUserInfo");
 
-if (result && result.code === 200 && result.data) {
-$.userMobile = result.data.mobile || result.data.phone || ‘未知’;
-$.integralBalance = result.data.integralBalance || result.data.points || 0;
-console.log(`账号: ${$.userMobile}  积分余额: ${$.integralBalance}`);
+if (!result) {
+  console.log(`⚠️ 用户信息查询失败（网络错误）`);
+  return;
+}
+
+if (result.code === 200 && result.data) {
+  $.userInfo = {
+    mobile: result.data.mobile || result.data.phone || '未知',
+    userName: result.data.userName || result.data.name || '',
+    integralBalance: result.data.integralBalance || result.data.points || 0
+  };
+
+  console.log(`✅ 账号: ${hideSensitiveData($.userInfo.mobile, 3, 4)}`);
+  console.log(`✅ 积分余额: ${$.userInfo.integralBalance}`);
+
+  $.result += `账号: ${hideSensitiveData($.userInfo.mobile, 3, 4)}\n`;
+  $.result += `积分余额: ${$.userInfo.integralBalance}\n`;
 } else {
-console.log(`❌ 用户信息查询失败`);
+  console.log(`⚠️ 用户信息查询失败: ${result.message || result.code}`);
+}
+```
+
+} catch (e) {
+console.log(`⚠️ getUserInfo异常: ${e}`);
 }
 }
 
-// ==================== 检查变量 ====================
+// ==================== 检查环境变量 ====================
 async function checkEnv() {
-tokenArr = token.split(’@’).filter(t => t && t.trim());
+tokenArr = token.split(’@’).filter(t => t && t.trim().length > 20);
 
-if (tokenArr[0]) {
-console.log(`\n检测到 ${tokenArr.length} 个账号\n`);
+if (tokenArr.length > 0) {
+console.log(`✅ 检测到 ${tokenArr.length} 个账号`);
 return tokenArr.length;
 } else {
-console.log(`\n检测到 0 个账号\n`);
+console.log(`⚠️ 检测到 0 个有效账号`);
 return 0;
 }
 }
@@ -223,14 +302,20 @@ if ($.isNode()) {
 try {
 var notify = require(’./sendNotify’);
 } catch (e) {
+try {
 var notify = require(’./utils/sendNotify’);
+} catch (e2) {
+console.log(`⚠️ 通知模块加载失败，使用控制台输出`);
+console.log(message);
+return;
+}
 }
 await notify.sendNotify($.name, message);
 } else {
 $.msg($.name, ‘’, message);
 }
 } else {
-console.log(message);
+console.log(`\n📱 签到结果:\n${message}`);
 }
 }
 
@@ -248,7 +333,7 @@ headers: {
 “Accept-Language”: “zh-Hans-CN;q=1”,
 “Authorization”: $.currentToken || token
 },
-timeout: 10000
+timeout: 15000
 };
 
 if (body) {
@@ -256,28 +341,28 @@ opt.body = body;
 opt.method = method.toUpperCase();
 }
 
-debug(opt);
+debug(opt, “request”);
 return opt;
 }
 
 // ==================== 调试函数 ====================
 function debug(content, title = “debug”) {
-let start = `\n----- ${title} -----\n`;
-let end = `\n----- ${$.time('HH:mm:ss')} -----\n`;
+if ($.is_debug !== ‘true’) return;
 
-if ($.is_debug === ‘true’) {
-if (typeof content == “string”) {
-console.log(start + content + end);
-} else if (typeof content == “object”) {
-console.log(start + JSON.stringify(content) + end);
-}
+let start = `\n----- ${title} @ ${$.time('HH:mm:ss')} -----`;
+let end = `----- end -----\n`;
+
+if (typeof content === “string”) {
+console.log(start + ‘\n’ + content + ‘\n’ + end);
+} else if (typeof content === “object”) {
+console.log(start + ‘\n’ + JSON.stringify(content, null, 2) + ‘\n’ + end);
 }
 }
 
 // ==================== 数据脱敏 ====================
 function hideSensitiveData(string, head_length = 2, foot_length = 2) {
 if (!string || string.length < head_length + foot_length) {
-return string;
+return string || ‘***’;
 }
 
 let star = ‘’;
@@ -298,28 +383,38 @@ return new Promise((resolve) => {
 $[method.toLowerCase()](options, (err, resp, data) => {
 try {
 if (err) {
-console.log(`❌ ${options.url} 请求失败: ${err}`);
+console.log(`❌ 请求失败: ${options.url}`);
+console.log(`   错误: ${err}`);
 resolve(null);
-} else {
-if (data) {
-try {
-let parsed = JSON.parse(data);
-if (typeof parsed === ‘object’) {
-data = parsed;
+return;
 }
-} catch (e) {
-console.log(`响应数据JSON解析失败`);
-}
-} else {
-console.log(`服务器返回空数据`);
-}
-resolve(data);
-}
-} catch (e) {
-console.log(`请求处理异常: ${e}`);
-resolve(null);
-}
+
+```
+    if (!data) {
+      console.log(`⚠️ 服务器返回空数据`);
+      resolve(null);
+      return;
+    }
+
+    // 尝试JSON解析
+    try {
+      let parsed = JSON.parse(data);
+      if (typeof parsed === 'object') {
+        resolve(parsed);
+        return;
+      }
+    } catch (e) {
+      console.log(`⚠️ JSON解析失败`);
+    }
+
+    resolve(data);
+  } catch (e) {
+    console.log(`❌ 请求处理异常: ${e}`);
+    resolve(null);
+  }
 });
+```
+
 });
 }
 
