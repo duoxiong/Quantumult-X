@@ -1,5 +1,5 @@
 /*
-长城/哈弗汽车自动签到 (修复版)
+长城/哈弗汽车自动签到 (最终增强版)
 By Duoxiong & Gemini
 Github: https://github.com/duoxiong/Quantumult-X
 
@@ -26,24 +26,32 @@ if (isGetCookie) {
 }
 
 function GetCookie() {
-  // 🚫 关键修复：直接忽略非 POST 请求 (过滤掉 OPTIONS 预检请求)
+  // 1. 过滤掉非 POST 请求
   if ($request.method !== "POST") {
+    // console.log("忽略非 POST 请求: " + $request.method);
     return;
   }
 
   const url = $request.url;
-  const headers = JSON.stringify($request.headers);
+  const headers = $request.headers;
   const body = $request.body || "";
+  
+  // 2. 将所有头部转为字符串并转小写，彻底解决大小写敏感问题
+  const headersStr = JSON.stringify(headers);
+  const headersLower = headersStr.toLowerCase();
 
-  // 双重校验：必须包含具体的 Token 值
-  if (headers.indexOf("Authorization") > -1 || headers.indexOf("G-Token") > -1) {
+  // 3. 只要包含 authorization 或 g-token (不分大小写) 就认为成功
+  if (headersLower.indexOf("authorization") > -1 || headersLower.indexOf("g-token") > -1) {
     $.setdata(url, key_url);
-    $.setdata(headers, key_headers);
+    $.setdata(headersStr, key_headers); // 保存原始的大小写 Headers
     $.setdata(body, key_body);
     
-    // 只有抓到真正的 Token 才通知
-    $.msg($.name, "🎉 抓取成功 (POST)", "凭证已更新，请去任务列表运行测试");
-    console.log(`[获取凭证成功]\nURL: ${url}\nHeaders: ${headers}\nBody: ${body}`);
+    $.msg($.name, "🎉 抓取成功", "凭证已获取，请去任务列表测试运行！");
+    console.log(`[抓取成功]\nURL: ${url}\nHeaders大小: ${headersStr.length}\nBody: ${body}`);
+  } else {
+    // 只有在确定是 POST 且确实没有 Token 时才报错，方便调试
+    console.log(`[抓取失败] 检测到 POST 请求但未发现 Token。\nHeaders内容: ${headersStr}`);
+    // $.msg($.name, "⚠️ 抓取失败", "未找到 Token，请查看日志详情");
   }
 }
 
@@ -53,7 +61,7 @@ async function SignIn() {
   const body = $.getdata(key_body);
 
   if (!url || !headersStr) {
-    $.msg($.name, "❌ 无法签到", "没有找到有效的凭证，请去 App 签到页刷新");
+    $.msg($.name, "❌ 无法签到", "请先去 App 签到页面下拉刷新获取凭证");
     return;
   }
 
@@ -89,6 +97,4 @@ async function SignIn() {
   });
 }
 
-// Env 函数保持不变，为了节省篇幅已省略，请保留你之前文件里的 Env 函数部分
-// 如果你之前删了，请把上一条回复里最后的 function Env... 完整复制过来放在最后
 function Env(t,e){class s{constructor(t){this.env=t}send(t,e="GET"){t="string"==typeof t?{url:t}:t;let s=this.get;return"POST"===e&&(s=this.post),new Promise((e,i)=>{s.call(this,t,(t,s,r)=>{t?i(t):e(s)})})}get(t){return this.send.call(this.env,t)}post(t){return this.send.call(this.env,t,"POST")}}return new class{constructor(t,e){this.name=t,this.http=new s(this),this.data=null,this.dataFile="box.dat",this.logs=[],this.isMute=!1,this.isSurge=!1,this.isQuanX="undefined"!=typeof $task,this.isLoon="undefined"!=typeof $loon,this.isSurge="undefined"!=typeof $httpClient&&!this.isLoon,this.node="undefined"!=typeof module&&!!module.exports,this.log=this.msg,this.start=Date.now()}isNode(){return"undefined"!=typeof module&&!!module.exports}write(t,e){if(this.logAtAll(),this.isNode()){try{let s=require("fs"),i=require("path"),r=i.resolve(this.dataFile),o=i.resolve(process.cwd(),this.dataFile);s.existsSync(r)||s.existsSync(o)||(s.writeFileSync(r,"{}","utf8"),console.log("Create Data File at: "+r)),s.writeFileSync(r,JSON.stringify(t),"utf8")}catch(t){console.log("Write File Error: "+t)}}else if(this.isQuanX)return $prefs.setValueForKey(t,e);else if(this.isSurge)return $persistentStore.write(t,e)}read(t){if(this.logAtAll(),this.isNode()){let e=require("fs"),s=require("path"),i=s.resolve(this.dataFile),r=s.resolve(process.cwd(),this.dataFile);try{return JSON.parse(e.readFileSync(i,"utf8"))}catch(t){return null}}else if(this.isQuanX)return $prefs.valueForKey(t);else if(this.isSurge)return $persistentStore.read(t)}setdata(t,e){let s=!1;if(/^@/.test(e)){const[,i,r]=/^@(.*?)\.(.*?)$/.exec(e),o=this.read(i);if(o){const e=JSON.parse(o);e[r]=t,s=this.write(JSON.stringify(e),i)}}else s=this.write(t,e);return s}getdata(t){let e=null;if(/^@/.test(t)){const[,s,i]=/^@(.*?)\.(.*?)$/.exec(t),r=this.read(s);if(r){const t=JSON.parse(r);e=t[i]}}else e=this.read(t);return e}msg(t,e,s,i){const r=t+" "+e+" "+s,o=[t,e,s];i&&o.push(i),this.isMute||(this.isQuanX?$notify.apply(this,o):this.isSurge&&$notification.post.apply(this,o),console.log(r)),this.logs.push(r)}logAtAll(){this.isNode()}done(t={}){const e=(Date.now()-this.start)/1000;this.msg(this.name,"运行结束",`耗时: ${e} 秒`),this.isNode()&&process.exit(1),this.isQuanX&&$done(t),this.isSurge&&$done(t)}}(t,e)}
