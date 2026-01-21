@@ -1,5 +1,5 @@
 /*
-长城/哈弗汽车自动签到 (最终增强版)
+长城/哈弗汽车自动签到 (最终稳定版 - 修复假死)
 By Duoxiong & Gemini
 Github: https://github.com/duoxiong/Quantumult-X
 
@@ -26,32 +26,24 @@ if (isGetCookie) {
 }
 
 function GetCookie() {
-  // 1. 过滤掉非 POST 请求
-  if ($request.method !== "POST") {
-    // console.log("忽略非 POST 请求: " + $request.method);
-    return;
-  }
+  if ($request.method !== "POST") return;
 
   const url = $request.url;
   const headers = $request.headers;
   const body = $request.body || "";
   
-  // 2. 将所有头部转为字符串并转小写，彻底解决大小写敏感问题
+  // 兼容大小写
   const headersStr = JSON.stringify(headers);
   const headersLower = headersStr.toLowerCase();
 
-  // 3. 只要包含 authorization 或 g-token (不分大小写) 就认为成功
+  // 只要包含 token 或 auth 就抓取
   if (headersLower.indexOf("authorization") > -1 || headersLower.indexOf("g-token") > -1) {
     $.setdata(url, key_url);
-    $.setdata(headersStr, key_headers); // 保存原始的大小写 Headers
+    $.setdata(headersStr, key_headers);
     $.setdata(body, key_body);
     
-    $.msg($.name, "🎉 抓取成功", "凭证已获取，请去任务列表测试运行！");
-    console.log(`[抓取成功]\nURL: ${url}\nHeaders大小: ${headersStr.length}\nBody: ${body}`);
-  } else {
-    // 只有在确定是 POST 且确实没有 Token 时才报错，方便调试
-    console.log(`[抓取失败] 检测到 POST 请求但未发现 Token。\nHeaders内容: ${headersStr}`);
-    // $.msg($.name, "⚠️ 抓取失败", "未找到 Token，请查看日志详情");
+    $.msg($.name, "🎉 抓取成功", "凭证已保存，请去任务列表运行");
+    console.log(`[抓取详情] URL: ${url}`);
   }
 }
 
@@ -61,39 +53,51 @@ async function SignIn() {
   const body = $.getdata(key_body);
 
   if (!url || !headersStr) {
-    $.msg($.name, "❌ 无法签到", "请先去 App 签到页面下拉刷新获取凭证");
+    $.msg($.name, "❌ 无法签到", "未找到 Cookie，请先去 App 签到页下拉刷新！");
+    $.done(); 
     return;
   }
 
-  const headers = JSON.parse(headersStr);
+  // 解析 Headers
+  let headers = JSON.parse(headersStr);
   
+  // 🔴 核心修复：删除可能导致死循环/超时的请求头
+  // 服务器会自动计算长度，手动保留会导致卡死
+  delete headers['Content-Length'];
+  delete headers['content-length'];
+  delete headers['Connection'];
+  delete headers['connection'];
+  delete headers['Host'];
+  delete headers['host'];
+
   const request = {
     url: url,
     method: "POST", 
     headers: headers,
-    body: body
+    body: body,
+    timeout: 10000 // 强制设置 10 秒超时，防止无限转圈
   };
 
   $.post(request, (error, response, data) => {
     if (error) {
-      $.msg($.name, "🚫 网络错误", "请检查网络连接");
-      console.log(error);
+      $.msg($.name, "🚫 网络请求超时", "服务器无响应或网络中断");
+      console.log(`[错误详情] ${JSON.stringify(error)}`);
     } else {
       try {
+        console.log(`[服务端返回] ${data}`);
         const result = JSON.parse(data);
-        console.log(`[响应数据]: ${data}`);
-        
         if (result.code == 200 || result.success || result.msg === "success") { 
            const score = result.data ? ` (积分: ${result.data})` : "";
            $.msg($.name, "✅ 签到成功", `服务端返回: ${result.message || "OK"}${score}`);
         } else {
-           $.msg($.name, "⚠️ 签到失败", `错误信息: ${result.message}`);
+           $.msg($.name, "⚠️ 签到失败", `错误: ${result.message}`);
         }
       } catch (e) {
-        $.msg($.name, "❌ 解析失败", "返回数据异常");
+        // 如果返回的不是 JSON (比如 HTML 报错页面)，也要能结束
+        $.msg($.name, "⚠️ 响应解析异常", "服务端返回了非 JSON 数据，详见日志");
       }
     }
-    $.done();
+    $.done(); // 必须调用，否则一直转圈
   });
 }
 
