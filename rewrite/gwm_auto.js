@@ -1,30 +1,27 @@
 /*
-长城/哈弗汽车自动签到 (免抓取·直连版)
+长城/哈弗汽车自动签到 (免抓取·直连修正版)
 By Duoxiong & Gemini
 Github: https://github.com/duoxiong/Quantumult-X
 
 [task_local]
-# 每天早上 9:00 自动签到 (注意：不需要 rewrite_local 规则了)
+# 每天早上 9:00 自动签到 (无需 rewrite 规则)
 0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
 */
 
 const $ = new Env("长城汽车签到");
 
 // -------------------------------------------------------------
-// 👇 用户配置区域 (已根据你提供的信息预填)
+// 👇 用户配置区域 (已修正 G-Token 格式)
 // -------------------------------------------------------------
 
-// 1. 签到接口地址 (你抓到的真实地址)
 const signUrl = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
 
-// 2. 请求体 Body (你提供的 userId)
-// 注意：保持 JSON 字符串格式
+// 请求体 (UserId 已确认)
 const signBody = JSON.stringify({
-  "userId": "U1386021354645749760" 
+  "userId": "U1386021354645749760"
 });
 
-// 3. 请求头 Headers (你抓到的那一大串)
-// 我已经把可能导致卡死的 Content-Length 等字段删掉了，只保留核心验证字段
+// 请求头 (已清理多余符号)
 const signHeaders = {
   "Host": "gwm-api.gwmapp-h.com",
   "AppID": "GWM-H5-110001",
@@ -38,12 +35,10 @@ const signHeaders = {
   "sourcetype": "H5",
   "Sec-Fetch-Site": "same-site",
   "Sec-Fetch-Dest": "empty",
-  // 签名和时间戳 (如果服务器不校验过期，这一套可以用很久)
   "sign": "a70f912f8a1e1d0b6b848b60cc52591f3d2a12bea25ec781ad13f9e4192474ce",
   "TimeStamp": "1769043392226",
-  // 核心 Token (你的身份证)
   "Authorization": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJqd3RfdHlwZSI6MSwiand0VHlwZSI6MSwiYmVhbklkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImtleSI6ImJlYW4tYXBwLXVzZXIta2V5IiwiZ3dtQnJhbmQiOiJDQ0cwMDEiLCJpc3MiOiJnd3QgU2VydmVyIiwic3NvSWQiOiJVMTM4NjAyMTM1NDY0NTc0OTc2MCIsInJvbGVDb2RlIjoiYWRtaW4iLCJnd21ScyI6IjIiLCJnd0lkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImlhdCI6MTc2ODg3ODMwOSwiZXhwIjoxNzY5NDgzMTA5LCJjaGFubmVsIjoiNTlCMTEzMkItQzU5OS00NjRCLTgxMjgtOTc2Q0E1QTI0MkZDIn0.AJGlpQDYuEGYXLi1Go5dsEYFXk5QfxVhP6f-b_BymAoKa_COyi0vO_7kh3MTYFPpGFYbJ9aeYINYhv9_cr-dWdU2Koke7dW2w6nyed5_I2hgTdpa3L-6RHM9wdbOv7C1BRBUA56BfbGdSpcAzwNhcR8QS7r4mHN1ywEq-4kHG80LhFfuSNVsUa5WzwhbSpDdTO-ptN7GIxgun4Kh7dzAfuCixfGSo37NBuvaHzDgtc1FmB211Tl0gSWfP4FO2hz8TZjrGLLU4iWQWW-a1LRRI1orXMyxFOXZKhYBXVpG1WrMt66Fgdq5vF8b2U_tWHKxirUaHHbjqGopU-ifsB32u5KFQ7NvQK8",
-  "G-Token": "eyJnc24iOiJTMSIsImFsZyI6IlNIQTI1NndpdGhSU0EiLCJ0eXAiOiJKV1QifQ.eyJuYmYiOjE3Njg4NzgzMDksInNvdXJjZUFwcCI6IkdXTSIsInNvdXJjZVR5cGUiOiJJT1MiLCJhcHBJZCI6IkdXTS1BUFAtSU9TLTExMDAwMjAiLCJleHAiOjE3Njk0ODMxMDksImlhdCI6MTc2ODg3ODMwOSwidXNlcklkIjoiVTEzODYwMjEzNTQ2NDU3NDk3NjAiLCJkZXZpY2VJZCI6IjU5QjExMzJCLUM1OTktNDY0Qi04MTI4LTk3NkNBNUEyNDJGQyJ9.dv6u68meIV9NrsPGynu6GQoUFKKx4yofiw989DUbno4sU8ih62+xUV4/czG8/iIA8RJuuCEsKW1hln97aROkptQSwKAGHFdIe50aUzIzS2OsLsKxNc2ZECicLxisB6AHzc4Y9WSpBpEyQ2UmtWw9ZRckSdLov3dpxRLBKzCni2QvqVVl5Za2dvZeP/i5T0G2JmYaw3bJ++MS/gUybK2Eq2R1GZaL5v3ChFFN1DQR+L3GjAu7niPyBiFBCNVvV5I+xP2ggjQIXb3riINzwKiV0bIsOqt0jiRqUM1NNsWo8BcdfUWaXNYcv6ynKknWHvvZyrS+opVGksoeDpEV6uEWaQ== -",
+  "G-Token": "eyJnc24iOiJTMSIsImFsZyI6IlNIQTI1NndpdGhSU0EiLCJ0eXAiOiJKV1QifQ.eyJuYmYiOjE3Njg4NzgzMDksInNvdXJjZUFwcCI6IkdXTSIsInNvdXJjZVR5cGUiOiJJT1MiLCJhcHBJZCI6IkdXTS1BUFAtSU9TLTExMDAwMjAiLCJleHAiOjE3Njk0ODMxMDksImlhdCI6MTc2ODg3ODMwOSwidXNlcklkIjoiVTEzODYwMjEzNTQ2NDU3NDk3NjAiLCJkZXZpY2VJZCI6IjU5QjExMzJCLUM1OTktNDY0Qi04MTI4LTk3NkNBNUEyNDJGQyJ9.dv6u68meIV9NrsPGynu6GQoUFKKx4yofiw989DUbno4sU8ih62+xUV4/czG8/iIA8RJuuCEsKW1hln97aROkptQSwKAGHFdIe50aUzIzS2OsLsKxNc2ZECicLxisB6AHzc4Y9WSpBpEyQ2UmtWw9ZRckSdLov3dpxRLBKzCni2QvqVVl5Za2dvZeP/i5T0G2JmYaw3bJ++MS/gUybK2Eq2R1GZaL5v3ChFFN1DQR+L3GjAu7niPyBiFBCNVvV5I+xP2ggjQIXb3riINzwKiV0bIsOqt0jiRqUM1NNsWo8BcdfUWaXNYcv6ynKknWHvvZyrS+opVGksoeDpEV6uEWaQ==",
   "Accept": "application/json, text/plain, */*",
   "Content-Type": "application/json",
   "Accept-Encoding": "gzip, deflate, br",
@@ -51,13 +46,13 @@ const signHeaders = {
 };
 
 // -------------------------------------------------------------
-// 👆 配置结束，以下逻辑不需要修改
+// 👆 核心数据区域结束
 // -------------------------------------------------------------
 
 SignIn();
 
 async function SignIn() {
-  $.msg($.name, "🚀 开始执行", "正在发起签到请求...");
+  $.msg($.name, "🚀 启动签到", "正在发起请求...");
 
   const request = {
     url: signUrl,
@@ -76,17 +71,16 @@ async function SignIn() {
         console.log(`[服务端返回] ${data}`);
         const result = JSON.parse(data);
         
-        // 成功判定
+        // 成功判定: 200 或 success 或 message 包含成功
         if (result.code == 200 || result.success || (result.message && result.message.indexOf("成功") > -1)) { 
            const score = result.data ? ` (积分: ${result.data})` : "";
            $.msg($.name, "✅ 签到成功", `结果: ${result.message || "OK"}${score}`);
         } else {
-           // 即使返回“今日已签到”也算成功
+           // 即使返回“今日已签到”也算运行成功
            $.msg($.name, "⚠️ 签到反馈", `状态: ${result.message}`);
         }
       } catch (e) {
-        // 部分情况可能返回 HTML 报错
-        $.msg($.name, "⚠️ 响应解析异常", "服务端返回数据非 JSON，详见日志");
+        $.msg($.name, "⚠️ 响应解析异常", "服务端数据非 JSON");
       }
     }
     $.done();
