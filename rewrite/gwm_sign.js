@@ -1,86 +1,150 @@
 /*
-长城/哈弗汽车自动签到 (直连硬核版)
-文件路径: rewrite/gwm_sign.js
+长城/哈弗汽车自动签到
+项目名称: GWM Auto Sign
+脚本作者: Gemini & Duoxiong
 更新时间: 2026-01-22
-说明: 基于抓包数据硬编码，无须Rewrite，直接运行任务即可。
+使用说明: 
+1. 进入 App 签到页面，等待弹出“🎉 凭证已捕获”。
+2. 每日 9:00 自动执行签到。
+
+[rewrite_local]
+# 🔥 核心抓取规则：锁定 sign/info 接口
+^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/app\/uc\/sign\/info url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
+
+[task_local]
+# 每日 9:00 执行签到
+0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
+
+[mitm]
+hostname = gwm-api.gwmapp-h.com
 */
 
 const $ = new Env("长城汽车签到");
 
 // -------------------------------------------------------
-// 1. 核心配置区 (已内置你的鉴权数据)
+// 1. 数据存储 Key
+// -------------------------------------------------------
+const KEY_AUTH = "duoxiong_gwm_auth";       // 身份 Authorization
+const KEY_GTOKEN = "duoxiong_gwm_gtoken";   // 身份 G-Token
+// 签到专用接口 (注意：抓取的是 info，但签到要发给 sureNew)
+const SIGN_ACTION_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
+
+// -------------------------------------------------------
+// 2. 逻辑入口
 // -------------------------------------------------------
 
-const config = {
-  // 真实的签到接口
-  url: "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew",
-  
-  // 你的 UserID
-  body: JSON.stringify({
-    "userId": "U1386021354645749760"
-  }),
+const isGetCookie = typeof $request !== "undefined";
 
-  // 请求头 (已移除 Host/Content-Length 等可能导致卡死的字段)
-  headers: {
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "Origin": "https://hippo-app-hw.gwmapp-h.com",
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 fromappios sapp cVer=1.9.9",
+if (isGetCookie) {
+  GetCookie();
+  $.done();
+} else {
+  SignIn();
+}
+
+// -------------------------------------------------------
+// 3. 抓取逻辑 (GetCookie)
+// -------------------------------------------------------
+function GetCookie() {
+  const url = $request.url;
+  const headers = $request.headers;
+  
+  // 仅当 URL 包含 sign/info 时触发
+  if (url.indexOf("sign/info") > -1) {
+    let newAuth = null;
+    let newToken = null;
+
+    // 遍历 Headers (忽略大小写)寻找 Token
+    for (let key in headers) {
+      if (key.toLowerCase() === "authorization") newAuth = headers[key];
+      if (key.toLowerCase() === "g-token") newToken = headers[key];
+    }
+
+    // 只要抓到 Token 就保存
+    if (newAuth || newToken) {
+      if (newAuth) $.setdata(newAuth, KEY_AUTH);
+      if (newToken) $.setdata(newToken, KEY_GTOKEN);
+
+      console.log(`[精准抓取] 来源: ${url}`);
+      console.log(`[抓取详情] Auth: ${newAuth ? "✅" : "❌"}, G-Token: ${newToken ? "✅" : "❌"}`);
+      
+      $.msg($.name, "🎉 凭证已捕获", "已从 sign/info 接口获取最新 Token！");
+    }
+  }
+}
+
+// -------------------------------------------------------
+// 4. 签到逻辑 (SignIn)
+// -------------------------------------------------------
+async function SignIn() {
+  $.msg($.name, "🚀 启动签到", "正在读取凭证...");
+
+  // (1) 读取存储的凭证
+  const auth = $.getdata(KEY_AUTH);
+  const gToken = $.getdata(KEY_GTOKEN);
+  
+  // 兜底配置 (你可以把你的 userId 填在这里作为备用)
+  const defaultBody = JSON.stringify({ "userId": "U1386021354645749760" });
+  
+  // 固定的有效签名 (用于绕过动态签名验证，如果过期需重新抓)
+  const staticSign = "a70f912f8a1e1d0b6b848b60cc52591f3d2a12bea25ec781ad13f9e4192474ce";
+  const staticTime = "1769043392226";
+
+  // (2) 检查凭证
+  if (!auth || !gToken) {
+    $.msg($.name, "🚫 无法签到", "请先进入 App 签到页面触发抓取！");
+    $.done();
+    return;
+  }
+
+  // (3) 组装请求
+  // 注意：这里使用刚才抓到的 Auth/Token，加上固定的 Sign/Time
+  const headers = {
+    "Host": "gwm-api.gwmapp-h.com",
     "AppID": "GWM-H5-110001",
     "sourceApp": "GWM",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 fromappios sapp cVer=1.9.9",
     "Authtype": "BMP",
-    // 你的真实凭证
-    "Authorization": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJqd3RfdHlwZSI6MSwiand0VHlwZSI6MSwiYmVhbklkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImtleSI6ImJlYW4tYXBwLXVzZXIta2V5IiwiZ3dtQnJhbmQiOiJDQ0cwMDEiLCJpc3MiOiJnd3QgU2VydmVyIiwic3NvSWQiOiJVMTM4NjAyMTM1NDY0NTc0OTc2MCIsInJvbGVDb2RlIjoiYWRtaW4iLCJnd21ScyI6IjIiLCJnd0lkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImlhdCI6MTc2ODg3ODMwOSwiZXhwIjoxNzY5NDgzMTA5LCJjaGFubmVsIjoiNTlCMTEzMkItQzU5OS00NjRCLTgxMjgtOTc2Q0E1QTI0MkZDIn0.AJGlpQDYuEGYXLi1Go5dsEYFXk5QfxVhP6f-b_BymAoKa_COyi0vO_7kh3MTYFPpGFYbJ9aeYINYhv9_cr-dWdU2Koke7dW2w6nyed5_I2hgTdpa3L-6RHM9wdbOv7C1BRBUA56BfbGdSpcAzwNhcR8QS7r4mHN1ywEq-4kHG80LhFfuSNVsUa5WzwhbSpDdTO-ptN7GIxgun4Kh7dzAfuCixfGSo37NBuvaHzDgtc1FmB211Tl0gSWfP4FO2hz8TZjrGLLU4iWQWW-a1LRRI1orXMyxFOXZKhYBXVpG1WrMt66Fgdq5vF8b2U_tWHKxirUaHHbjqGopU-ifsB32u5KFQ7NvQK8",
-    "G-Token": "eyJnc24iOiJTMSIsImFsZyI6IlNIQTI1NndpdGhSU0EiLCJ0eXAiOiJKV1QifQ.eyJuYmYiOjE3Njg4NzgzMDksInNvdXJjZUFwcCI6IkdXTSIsInNvdXJjZVR5cGUiOiJJT1MiLCJhcHBJZCI6IkdXTS1BUFAtSU9TLTExMDAwMjAiLCJleHAiOjE3Njk0ODMxMDksImlhdCI6MTc2ODg3ODMwOSwidXNlcklkIjoiVTEzODYwMjEzNTQ2NDU3NDk3NjAiLCJkZXZpY2VJZCI6IjU5QjExMzJCLUM1OTktNDY0Qi04MTI4LTk3NkNBNUEyNDJGQyJ9.dv6u68meIV9NrsPGynu6GQoUFKKx4yofiw989DUbno4sU8ih62+xUV4/czG8/iIA8RJuuCEsKW1hln97aROkptQSwKAGHFdIe50aUzIzS2OsLsKxNc2ZECicLxisB6AHzc4Y9WSpBpEyQ2UmtWw9ZRckSdLov3dpxRLBKzCni2QvqVVl5Za2dvZeP/i5T0G2JmYaw3bJ++MS/gUybK2Eq2R1GZaL5v3ChFFN1DQR+L3GjAu7niPyBiFBCNVvV5I+xP2ggjQIXb3riINzwKiV0bIsOqt0jiRqUM1NNsWo8BcdfUWaXNYcv6ynKknWHvvZyrS+opVGksoeDpEV6uEWaQ==",
-    // 你的签名数据
-    "sign": "a70f912f8a1e1d0b6b848b60cc52591f3d2a12bea25ec781ad13f9e4192474ce",
-    "TimeStamp": "1769043392226"
-  }
-};
-
-// -------------------------------------------------------
-// 2. 执行逻辑
-// -------------------------------------------------------
-
-main();
-
-async function main() {
-  $.msg($.name, "🚀 发起签到", "正在直连服务器...");
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    
+    // 组合拳：最新 Token + 静态签名
+    "Authorization": auth,
+    "G-Token": gToken,
+    "sign": staticSign,
+    "TimeStamp": staticTime
+  };
 
   const options = {
-    url: config.url,
+    url: SIGN_ACTION_URL,
     method: "POST",
-    headers: config.headers,
-    body: config.body,
-    timeout: 15000 // 15秒超时设置，防止无限转圈
+    headers: headers,
+    body: defaultBody,
+    timeout: 20000
   };
 
   $.post(options, (err, resp, data) => {
-    // 1. 处理网络层面的错误
     if (err) {
       console.log("❌ 网络错误: " + JSON.stringify(err));
-      $.msg($.name, "🚫 网络请求失败", "请检查网络连接");
+      $.msg($.name, "🚫 网络失败", "无法连接服务器");
       $.done();
       return;
     }
 
-    // 2. 处理业务层面的结果
     try {
-      console.log("服务器返回: " + data);
+      console.log("服务器响应: " + data);
       const result = JSON.parse(data);
 
-      // 判定成功的条件：code=200 或 success=true 或 消息包含“成功”
       if (result.code == 200 || result.success || (result.message && result.message.includes("成功"))) {
-        const score = result.data ? ` (积分: ${result.data})` : "";
-        $.msg($.name, "✅ 签到成功", `结果: ${result.message || "OK"}${score}`);
+        const score = result.data ? `积分: ${result.data}` : "";
+        $.msg($.name, "✅ 签到成功", `结果: ${result.message} ${score}`);
+      } else if (result.code == 401) {
+        $.msg($.name, "⚠️ 签名过期", "请手动点击一次‘签到’按钮来刷新签名");
       } else {
-        // 即使是“今日已签到”也算成功运行
-        $.msg($.name, "⚠️ 签到反馈", `状态: ${result.message}`);
+        $.msg($.name, "⚠️ 签到反馈", `提示: ${result.message}`);
       }
     } catch (e) {
-      console.log("解析异常: " + e);
-      // 如果返回的不是 JSON（比如HTML报错页），也提示出来
-      $.msg($.name, "❌ 数据异常", "服务端返回了非 JSON 格式数据");
+      $.msg($.name, "❌ 异常", "服务端返回数据非 JSON");
     }
     
     $.done();
@@ -88,7 +152,7 @@ async function main() {
 }
 
 // -------------------------------------------------------
-// 3. 极简 Env 工具函数 (无需改动)
+// 5. Env 工具函数
 // -------------------------------------------------------
 function Env(name) {
   return new class {
@@ -96,6 +160,14 @@ function Env(name) {
     msg(title, sub, desc) {
       if (typeof $notify !== "undefined") $notify(title, sub, desc);
       console.log(`[${title}] ${sub} - ${desc}`);
+    }
+    setdata(val, key) {
+      if (typeof $prefs !== "undefined") return $prefs.setValueForKey(val, key);
+      if (typeof $persistentStore !== "undefined") return $persistentStore.write(val, key);
+    }
+    getdata(key) {
+      if (typeof $prefs !== "undefined") return $prefs.valueForKey(key);
+      if (typeof $persistentStore !== "undefined") return $persistentStore.read(key);
     }
     post(opts, cb) {
       if (typeof $task !== "undefined") {
