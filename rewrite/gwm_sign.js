@@ -1,43 +1,38 @@
 /*
 长城/哈弗汽车自动签到
-项目名称: GWM Auto Sign
+项目名称: GWM Auto Sign (Dynamic)
 脚本作者: Gemini & Duoxiong
 更新时间: 2026-01-22
 使用说明: 
-1. 首次使用请打开 App，点击“我的”或等待首页加载，直到弹出“凭证已捕获”。
-2. 每日 9:00 自动执行签到。
+1. 首次使用或提示 401 错误时：请打开 App -> 签到页面 -> 点击“签到”按钮 (必须点按钮，为了抓取签名)。
+2. 等待 Quantumult X 弹窗“🎉 核心签名已捕获”。
+3. 每日 9:00 自动执行。
 
 [rewrite_local]
-# 匹配 用户中心(点击我的)、车辆信息(首页)、App配置(启动)、启动广告 接口，全方位自动抓取
-^https:\/\/(gapp-api|gw-app-gateway|bmp-api)\.gwmapp-h\.com\/(api-u\/v1\/app\/uc\/.*|app-api\/api\/v3\.0\/vehicle\/function\/item|config\/v1\/app\/config\/s0\/gwm-app-config|api-c\/v1\/app\/community\/advertisement\/launch) url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
+# 核心抓取：同时监听“用户中心”(用于保活Token) 和 “签到接口”(用于抓取签名)
+^https:\/\/(gapp-api|gwm-api)\.gwmapp-h\.com\/(api-u\/v1\/app\/uc\/.*|community-u\/v1\/user\/sign\/sureNew) url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
 
 [task_local]
 # 每日 9:00 执行签到
 0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
 
 [mitm]
-hostname = gapp-api.gwmapp-h.com, gw-app-gateway.gwmapp-h.com, bmp-api.gwmapp-h.com, gwm-api.gwmapp-h.com
+hostname = gapp-api.gwmapp-h.com, gwm-api.gwmapp-h.com
 */
 
 const $ = new Env("长城汽车签到");
 
 // -------------------------------------------------------
-// 1. 配置区域
+// 1. 数据存储 Key
 // -------------------------------------------------------
+const KEY_AUTH = "duoxiong_gwm_auth";       // 身份 Authorization
+const KEY_GTOKEN = "duoxiong_gwm_gtoken";   // 身份 G-Token
+const KEY_SIGN = "duoxiong_gwm_sign";       // 动态签名 Sign
+const KEY_TIME = "duoxiong_gwm_timestamp";  // 动态时间戳 TimeStamp
+const KEY_BODY = "duoxiong_gwm_body";       // 包含 userId 的 Body
 
-// 存储 Key
-const KEY_AUTH = "duoxiong_gwm_auth";
-const KEY_GTOKEN = "duoxiong_gwm_gtoken";
-
-// 🏆 签到核心配置
-const SIGN_CONFIG = {
-  url: "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew",
-  // 固定 UserID (你的账号)
-  body: JSON.stringify({ "userId": "U1386021354645749760" }),
-  // 固定签名 (验证过的有效签名)
-  sign: "a70f912f8a1e1d0b6b848b60cc52591f3d2a12bea25ec781ad13f9e4192474ce",
-  timestamp: "1769043392226"
-};
+// 签到接口地址
+const SIGN_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
 
 // -------------------------------------------------------
 // 2. 逻辑入口
@@ -58,29 +53,52 @@ if (isGetCookie) {
 function GetCookie() {
   const url = $request.url;
   const headers = $request.headers;
+  const body = $request.body;
   
+  // 标记是否更新了数据
+  let capturedType = null;
+
+  // 1. 抓取通用鉴权信息 (Auth & Token)
+  // 这两个在“我的”页面或者“签到”页面都能抓到
   let newAuth = null;
   let newToken = null;
+  let newSign = null;
+  let newTime = null;
 
-  // 遍历 Headers (忽略大小写)
   for (let key in headers) {
-    if (key.toLowerCase() === "authorization") newAuth = headers[key];
-    if (key.toLowerCase() === "g-token") newToken = headers[key];
+    const k = key.toLowerCase();
+    if (k === "authorization") newAuth = headers[key];
+    if (k === "g-token") newToken = headers[key];
+    if (k === "sign") newSign = headers[key];
+    if (k === "timestamp") newTime = headers[key];
   }
 
-  // 只要抓到数据就保存
-  if (newAuth || newToken) {
-    if (newAuth) $.setdata(newAuth, KEY_AUTH);
-    if (newToken) $.setdata(newToken, KEY_GTOKEN);
+  // 保存通用 Token (保活)
+  if (newAuth) $.setdata(newAuth, KEY_AUTH);
+  if (newToken) $.setdata(newToken, KEY_GTOKEN);
 
-    // 简单弹窗提示
-    // 为了防止首页多个接口并发导致弹窗刷屏，这里只在控制台打印详情
-    console.log(`[自动抓取] 来源: ${url}`);
-    
-    // 只有当两个都齐全时，才弹窗提示（或者你可以选择每次更新都弹窗）
-    if (newAuth && newToken) {
-       $.msg($.name, "🎉 凭证已捕获", "Token 已保存，签到脚本准备就绪！");
+  // 2. [核心] 抓取签到专用的签名
+  // 只有当 URL 是签到接口时，才保存 Sign 和 Timestamp
+  if (url.indexOf("user/sign/sureNew") > -1) {
+    if (newSign && newTime) {
+      $.setdata(newSign, KEY_SIGN);
+      $.setdata(newTime, KEY_TIME);
+      if (body) $.setdata(body, KEY_BODY);
+      
+      capturedType = "SIGN";
+      console.log(`[核心抓取] 捕获到签名: ${newSign}`);
     }
+  } else if (newAuth || newToken) {
+    // 只是在浏览 App，更新一下 Token
+    capturedType = "TOKEN";
+  }
+
+  // 3. 提示逻辑
+  if (capturedType === "SIGN") {
+    // 只有抓到了签名才弹窗，因为这是解决问题的关键
+    $.msg($.name, "🎉 核心签名已捕获", "脚本已获取最新签名，下次将使用此签名尝试签到！");
+  } else if (capturedType === "TOKEN") {
+    console.log(`[自动续期] 已更新 Auth/Token 来自: ${url}`);
   }
 }
 
@@ -88,57 +106,60 @@ function GetCookie() {
 // 4. 签到逻辑 (SignIn)
 // -------------------------------------------------------
 async function SignIn() {
-  $.msg($.name, "🚀 启动签到", "正在读取凭证...");
+  $.msg($.name, "🚀 启动签到", "正在读取本地凭证...");
 
-  // (1) 读取存储的凭证
+  // (1) 读取存储的数据
   const auth = $.getdata(KEY_AUTH);
   const gToken = $.getdata(KEY_GTOKEN);
+  const sign = $.getdata(KEY_SIGN);
+  const timestamp = $.getdata(KEY_TIME);
+  // 兜底 Body
+  const body = $.getdata(KEY_BODY) || JSON.stringify({ "userId": "U1386021354645749760" });
 
-  // (2) 检查凭证是否存在
-  if (!auth || !gToken) {
-    console.log("❌ 失败：未找到 Authorization 或 G-Token");
-    $.msg($.name, "🚫 无法签到", "数据为空！请打开 App 点击“我的”或等待首页加载进行抓取。");
+  // (2) 检查数据完整性
+  if (!auth || !gToken || !sign || !timestamp) {
+    const missing = [];
+    if (!auth) missing.push("Auth");
+    if (!sign) missing.push("Sign");
+    console.log(`❌ 缺失数据: ${missing.join(", ")}`);
+    $.msg($.name, "🚫 缺少签名", "请去 App 签到页面，手动点击一次‘签到’按钮以捕获签名！");
     $.done();
     return;
   }
 
   // (3) 组装请求
+  // 移除 Host，防止卡死
   const headers = {
-    "Host": "gwm-api.gwmapp-h.com",
     "AppID": "GWM-H5-110001",
     "sourceApp": "GWM",
     "Secret": "8bc742859a7849ec9a924c979afa5a9a",
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 fromappios sapp cVer=1.9.9",
-    "Referer": "https://hippo-app-hw.gwmapp-h.com/",
     "Authtype": "BMP",
     "sourceAppVer": "1.9.9",
     "Origin": "https://hippo-app-hw.gwmapp-h.com",
     "sourcetype": "H5",
-    "Sec-Fetch-Site": "same-site",
-    "Sec-Fetch-Dest": "empty",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
     
-    // 核心参数
-    "sign": SIGN_CONFIG.sign,
-    "TimeStamp": SIGN_CONFIG.timestamp,
+    // 使用动态抓取到的数据
+    "sign": sign,
+    "TimeStamp": timestamp,
     "Authorization": auth,
     "G-Token": gToken
   };
 
   const options = {
-    url: SIGN_CONFIG.url,
+    url: SIGN_URL,
     method: "POST",
     headers: headers,
-    body: SIGN_CONFIG.body,
+    body: body,
     timeout: 20000
   };
 
-  // (4) 发送请求
   $.post(options, (err, resp, data) => {
     if (err) {
       console.log("❌ 网络错误: " + JSON.stringify(err));
-      $.msg($.name, "🚫 网络请求失败", "请检查网络或代理设置");
+      $.msg($.name, "🚫 网络失败", "无法连接长城服务器");
       $.done();
       return;
     }
@@ -150,12 +171,15 @@ async function SignIn() {
       if (result.code == 200 || result.success || (result.message && result.message.includes("成功"))) {
         const score = result.data ? `积分: ${result.data}` : "";
         $.msg($.name, "✅ 签到成功", `结果: ${result.message} ${score}`);
+      } else if (result.code == 401 || (result.message && result.message.includes("sign"))) {
+        // 如果依然报 401，说明签名是一次性的或已过期
+        $.msg($.name, "⚠️ 签名失效", "请重新点击 App 里的签到按钮，抓取最新签名。");
       } else {
         $.msg($.name, "⚠️ 签到反馈", `提示: ${result.message}`);
       }
     } catch (e) {
       console.log("解析错误: " + e);
-      $.msg($.name, "❌ 数据异常", "服务端返回数据非 JSON");
+      $.msg($.name, "❌ 异常", "数据解析失败");
     }
     
     $.done();
