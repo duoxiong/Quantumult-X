@@ -1,101 +1,92 @@
 /*
-长城/哈弗汽车自动签到 (最终完美适配版)
+长城/哈弗汽车自动签到 (免抓取·直连版)
 By Duoxiong & Gemini
 Github: https://github.com/duoxiong/Quantumult-X
 
-[rewrite_local]
-^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/user\/sign\/sureNew url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
-
 [task_local]
+# 每天早上 9:00 自动签到 (注意：不需要 rewrite_local 规则了)
 0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
 */
 
 const $ = new Env("长城汽车签到");
-const isGetCookie = typeof $request !== "undefined";
 
-// 使用全新的 Key，避免读取到旧的错误数据
-const key_url = "duoxiong_gwm_v2_url";
-const key_headers = "duoxiong_gwm_v2_headers";
-const key_body = "duoxiong_gwm_v2_body";
+// -------------------------------------------------------------
+// 👇 用户配置区域 (已根据你提供的信息预填)
+// -------------------------------------------------------------
 
-if (isGetCookie) {
-  GetCookie();
-  $.done();
-} else {
-  SignIn();
-}
+// 1. 签到接口地址 (你抓到的真实地址)
+const signUrl = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
 
-function GetCookie() {
-  // 只拦截 POST 请求
-  if ($request.method !== "POST") return;
+// 2. 请求体 Body (你提供的 userId)
+// 注意：保持 JSON 字符串格式
+const signBody = JSON.stringify({
+  "userId": "U1386021354645749760" 
+});
 
-  const url = $request.url;
-  const headers = $request.headers;
-  const body = $request.body || "";
-  
-  const headersStr = JSON.stringify(headers);
-  const headersLower = headersStr.toLowerCase();
+// 3. 请求头 Headers (你抓到的那一大串)
+// 我已经把可能导致卡死的 Content-Length 等字段删掉了，只保留核心验证字段
+const signHeaders = {
+  "Host": "gwm-api.gwmapp-h.com",
+  "AppID": "GWM-H5-110001",
+  "sourceApp": "GWM",
+  "Secret": "8bc742859a7849ec9a924c979afa5a9a",
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 fromappios sapp cVer=1.9.9",
+  "Referer": "https://hippo-app-hw.gwmapp-h.com/",
+  "Authtype": "BMP",
+  "sourceAppVer": "1.9.9",
+  "Origin": "https://hippo-app-hw.gwmapp-h.com",
+  "sourcetype": "H5",
+  "Sec-Fetch-Site": "same-site",
+  "Sec-Fetch-Dest": "empty",
+  // 签名和时间戳 (如果服务器不校验过期，这一套可以用很久)
+  "sign": "a70f912f8a1e1d0b6b848b60cc52591f3d2a12bea25ec781ad13f9e4192474ce",
+  "TimeStamp": "1769043392226",
+  // 核心 Token (你的身份证)
+  "Authorization": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJqd3RfdHlwZSI6MSwiand0VHlwZSI6MSwiYmVhbklkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImtleSI6ImJlYW4tYXBwLXVzZXIta2V5IiwiZ3dtQnJhbmQiOiJDQ0cwMDEiLCJpc3MiOiJnd3QgU2VydmVyIiwic3NvSWQiOiJVMTM4NjAyMTM1NDY0NTc0OTc2MCIsInJvbGVDb2RlIjoiYWRtaW4iLCJnd21ScyI6IjIiLCJnd0lkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImlhdCI6MTc2ODg3ODMwOSwiZXhwIjoxNzY5NDgzMTA5LCJjaGFubmVsIjoiNTlCMTEzMkItQzU5OS00NjRCLTgxMjgtOTc2Q0E1QTI0MkZDIn0.AJGlpQDYuEGYXLi1Go5dsEYFXk5QfxVhP6f-b_BymAoKa_COyi0vO_7kh3MTYFPpGFYbJ9aeYINYhv9_cr-dWdU2Koke7dW2w6nyed5_I2hgTdpa3L-6RHM9wdbOv7C1BRBUA56BfbGdSpcAzwNhcR8QS7r4mHN1ywEq-4kHG80LhFfuSNVsUa5WzwhbSpDdTO-ptN7GIxgun4Kh7dzAfuCixfGSo37NBuvaHzDgtc1FmB211Tl0gSWfP4FO2hz8TZjrGLLU4iWQWW-a1LRRI1orXMyxFOXZKhYBXVpG1WrMt66Fgdq5vF8b2U_tWHKxirUaHHbjqGopU-ifsB32u5KFQ7NvQK8",
+  "G-Token": "eyJnc24iOiJTMSIsImFsZyI6IlNIQTI1NndpdGhSU0EiLCJ0eXAiOiJKV1QifQ.eyJuYmYiOjE3Njg4NzgzMDksInNvdXJjZUFwcCI6IkdXTSIsInNvdXJjZVR5cGUiOiJJT1MiLCJhcHBJZCI6IkdXTS1BUFAtSU9TLTExMDAwMjAiLCJleHAiOjE3Njk0ODMxMDksImlhdCI6MTc2ODg3ODMwOSwidXNlcklkIjoiVTEzODYwMjEzNTQ2NDU3NDk3NjAiLCJkZXZpY2VJZCI6IjU5QjExMzJCLUM1OTktNDY0Qi04MTI4LTk3NkNBNUEyNDJGQyJ9.dv6u68meIV9NrsPGynu6GQoUFKKx4yofiw989DUbno4sU8ih62+xUV4/czG8/iIA8RJuuCEsKW1hln97aROkptQSwKAGHFdIe50aUzIzS2OsLsKxNc2ZECicLxisB6AHzc4Y9WSpBpEyQ2UmtWw9ZRckSdLov3dpxRLBKzCni2QvqVVl5Za2dvZeP/i5T0G2JmYaw3bJ++MS/gUybK2Eq2R1GZaL5v3ChFFN1DQR+L3GjAu7niPyBiFBCNVvV5I+xP2ggjQIXb3riINzwKiV0bIsOqt0jiRqUM1NNsWo8BcdfUWaXNYcv6ynKknWHvvZyrS+opVGksoeDpEV6uEWaQ== -",
+  "Accept": "application/json, text/plain, */*",
+  "Content-Type": "application/json",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Sec-Fetch-Mode": "cors"
+};
 
-  // 只要包含 token 或 auth 就抓取
-  if (headersLower.indexOf("authorization") > -1 || headersLower.indexOf("g-token") > -1) {
-    $.setdata(url, key_url);
-    $.setdata(headersStr, key_headers);
-    $.setdata(body, key_body);
-    
-    // 弹窗提示
-    $.msg($.name, "🎉 抓取成功", "已捕获真实签到数据 (sureNew)，脚本准备就绪！");
-    console.log(`[抓取详情] URL: ${url}`);
-    console.log(`[抓取Body] ${body}`);
-  }
-}
+// -------------------------------------------------------------
+// 👆 配置结束，以下逻辑不需要修改
+// -------------------------------------------------------------
+
+SignIn();
 
 async function SignIn() {
-  const url = $.getdata(key_url);
-  const headersStr = $.getdata(key_headers);
-  const body = $.getdata(key_body);
-
-  if (!url || !headersStr) {
-    $.msg($.name, "❌ 无法签到", "数据为空，请去App点击'签到'按钮来触发抓取");
-    $.done(); 
-    return;
-  }
-
-  let headers = JSON.parse(headersStr);
-  
-  // 核心防卡死：删除多余的头
-  delete headers['Content-Length'];
-  delete headers['content-length'];
-  delete headers['Connection'];
-  delete headers['connection'];
-  delete headers['Host'];
-  delete headers['host'];
+  $.msg($.name, "🚀 开始执行", "正在发起签到请求...");
 
   const request = {
-    url: url,
+    url: signUrl,
     method: "POST", 
-    headers: headers,
-    body: body,
-    timeout: 10000 // 10秒超时
+    headers: signHeaders,
+    body: signBody,
+    timeout: 15000 // 15秒超时
   };
 
   $.post(request, (error, response, data) => {
     if (error) {
       console.log(`[网络错误] ${JSON.stringify(error)}`);
-      $.msg($.name, "🚫 网络异常", "请求发送失败");
+      $.msg($.name, "🚫 网络请求失败", error.message || "连接超时");
     } else {
       try {
         console.log(`[服务端返回] ${data}`);
         const result = JSON.parse(data);
-        // code 200 或者 success 为 true，或者 message 包含成功
+        
+        // 成功判定
         if (result.code == 200 || result.success || (result.message && result.message.indexOf("成功") > -1)) { 
            const score = result.data ? ` (积分: ${result.data})` : "";
            $.msg($.name, "✅ 签到成功", `结果: ${result.message || "OK"}${score}`);
         } else {
-           // 如果返回 "今日已签到" 也算成功
+           // 即使返回“今日已签到”也算成功
            $.msg($.name, "⚠️ 签到反馈", `状态: ${result.message}`);
         }
       } catch (e) {
-        $.msg($.name, "⚠️ 数据解析异常", "服务端返回了非 JSON 数据");
+        // 部分情况可能返回 HTML 报错
+        $.msg($.name, "⚠️ 响应解析异常", "服务端返回数据非 JSON，详见日志");
       }
     }
     $.done();
