@@ -1,29 +1,27 @@
 /*
-长城/哈弗汽车自动签到 (免抓取·直连修正版)
+长城/哈弗汽车自动签到 (防假死·直连修复版)
 By Duoxiong & Gemini
 Github: https://github.com/duoxiong/Quantumult-X
 
 [task_local]
-# 每天早上 9:00 自动签到 (无需 rewrite 规则)
 0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
 */
 
 const $ = new Env("长城汽车签到");
 
 // -------------------------------------------------------------
-// 👇 用户配置区域 (已修正 G-Token 格式)
+// 👇 用户配置区域
 // -------------------------------------------------------------
 
 const signUrl = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
 
-// 请求体 (UserId 已确认)
+// 请求体
 const signBody = JSON.stringify({
   "userId": "U1386021354645749760"
 });
 
-// 请求头 (已清理多余符号)
+// 请求头 (已移除 Host，防止请求卡死)
 const signHeaders = {
-  "Host": "gwm-api.gwmapp-h.com",
   "AppID": "GWM-H5-110001",
   "sourceApp": "GWM",
   "Secret": "8bc742859a7849ec9a924c979afa5a9a",
@@ -46,8 +44,14 @@ const signHeaders = {
 };
 
 // -------------------------------------------------------------
-// 👆 核心数据区域结束
+// 👆 核心数据区域
 // -------------------------------------------------------------
+
+// 设置超时保险，防止无限转圈
+const timeout = setTimeout(() => {
+  $.msg($.name, "🚫 执行超时", "请求卡死，已强制停止");
+  $.done();
+}, 20000);
 
 SignIn();
 
@@ -59,24 +63,24 @@ async function SignIn() {
     method: "POST", 
     headers: signHeaders,
     body: signBody,
-    timeout: 15000 // 15秒超时
+    timeout: 15000 // 网络层超时
   };
 
   $.post(request, (error, response, data) => {
+    clearTimeout(timeout); // 请求回来后取消保险
+    
     if (error) {
       console.log(`[网络错误] ${JSON.stringify(error)}`);
-      $.msg($.name, "🚫 网络请求失败", error.message || "连接超时");
+      $.msg($.name, "🚫 网络请求失败", error.message || "连接中断");
     } else {
       try {
         console.log(`[服务端返回] ${data}`);
         const result = JSON.parse(data);
         
-        // 成功判定: 200 或 success 或 message 包含成功
         if (result.code == 200 || result.success || (result.message && result.message.indexOf("成功") > -1)) { 
            const score = result.data ? ` (积分: ${result.data})` : "";
            $.msg($.name, "✅ 签到成功", `结果: ${result.message || "OK"}${score}`);
         } else {
-           // 即使返回“今日已签到”也算运行成功
            $.msg($.name, "⚠️ 签到反馈", `状态: ${result.message}`);
         }
       } catch (e) {
