@@ -1,10 +1,10 @@
 /*
-长城/哈弗汽车自动签到 (最终稳定版 - 修复假死)
+长城/哈弗汽车自动签到 (最终完美适配版)
 By Duoxiong & Gemini
 Github: https://github.com/duoxiong/Quantumult-X
 
 [rewrite_local]
-^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/app\/uc\/sign\/info url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
+^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/user\/sign\/sureNew url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js
 
 [task_local]
 0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_auto.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
@@ -13,10 +13,10 @@ Github: https://github.com/duoxiong/Quantumult-X
 const $ = new Env("长城汽车签到");
 const isGetCookie = typeof $request !== "undefined";
 
-// 存储 Key
-const key_url = "duoxiong_gwm_url";
-const key_headers = "duoxiong_gwm_headers";
-const key_body = "duoxiong_gwm_body";
+// 使用全新的 Key，避免读取到旧的错误数据
+const key_url = "duoxiong_gwm_v2_url";
+const key_headers = "duoxiong_gwm_v2_headers";
+const key_body = "duoxiong_gwm_v2_body";
 
 if (isGetCookie) {
   GetCookie();
@@ -26,13 +26,13 @@ if (isGetCookie) {
 }
 
 function GetCookie() {
+  // 只拦截 POST 请求
   if ($request.method !== "POST") return;
 
   const url = $request.url;
   const headers = $request.headers;
   const body = $request.body || "";
   
-  // 兼容大小写
   const headersStr = JSON.stringify(headers);
   const headersLower = headersStr.toLowerCase();
 
@@ -42,8 +42,10 @@ function GetCookie() {
     $.setdata(headersStr, key_headers);
     $.setdata(body, key_body);
     
-    $.msg($.name, "🎉 抓取成功", "凭证已保存，请去任务列表运行");
+    // 弹窗提示
+    $.msg($.name, "🎉 抓取成功", "已捕获真实签到数据 (sureNew)，脚本准备就绪！");
     console.log(`[抓取详情] URL: ${url}`);
+    console.log(`[抓取Body] ${body}`);
   }
 }
 
@@ -53,16 +55,14 @@ async function SignIn() {
   const body = $.getdata(key_body);
 
   if (!url || !headersStr) {
-    $.msg($.name, "❌ 无法签到", "未找到 Cookie，请先去 App 签到页下拉刷新！");
+    $.msg($.name, "❌ 无法签到", "数据为空，请去App点击'签到'按钮来触发抓取");
     $.done(); 
     return;
   }
 
-  // 解析 Headers
   let headers = JSON.parse(headersStr);
   
-  // 🔴 核心修复：删除可能导致死循环/超时的请求头
-  // 服务器会自动计算长度，手动保留会导致卡死
+  // 核心防卡死：删除多余的头
   delete headers['Content-Length'];
   delete headers['content-length'];
   delete headers['Connection'];
@@ -75,29 +75,30 @@ async function SignIn() {
     method: "POST", 
     headers: headers,
     body: body,
-    timeout: 10000 // 强制设置 10 秒超时，防止无限转圈
+    timeout: 10000 // 10秒超时
   };
 
   $.post(request, (error, response, data) => {
     if (error) {
-      $.msg($.name, "🚫 网络请求超时", "服务器无响应或网络中断");
-      console.log(`[错误详情] ${JSON.stringify(error)}`);
+      console.log(`[网络错误] ${JSON.stringify(error)}`);
+      $.msg($.name, "🚫 网络异常", "请求发送失败");
     } else {
       try {
         console.log(`[服务端返回] ${data}`);
         const result = JSON.parse(data);
-        if (result.code == 200 || result.success || result.msg === "success") { 
+        // code 200 或者 success 为 true，或者 message 包含成功
+        if (result.code == 200 || result.success || (result.message && result.message.indexOf("成功") > -1)) { 
            const score = result.data ? ` (积分: ${result.data})` : "";
-           $.msg($.name, "✅ 签到成功", `服务端返回: ${result.message || "OK"}${score}`);
+           $.msg($.name, "✅ 签到成功", `结果: ${result.message || "OK"}${score}`);
         } else {
-           $.msg($.name, "⚠️ 签到失败", `错误: ${result.message}`);
+           // 如果返回 "今日已签到" 也算成功
+           $.msg($.name, "⚠️ 签到反馈", `状态: ${result.message}`);
         }
       } catch (e) {
-        // 如果返回的不是 JSON (比如 HTML 报错页面)，也要能结束
-        $.msg($.name, "⚠️ 响应解析异常", "服务端返回了非 JSON 数据，详见日志");
+        $.msg($.name, "⚠️ 数据解析异常", "服务端返回了非 JSON 数据");
       }
     }
-    $.done(); // 必须调用，否则一直转圈
+    $.done();
   });
 }
 
