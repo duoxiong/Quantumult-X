@@ -1,146 +1,75 @@
 /*
-长城/哈弗汽车自动签到 (原生防卡死版)
-项目名称: GWM Auto Sign (Native)
-更新时间: 2026-01-22
-核心修复: 
-1. 移除 Env 包装类，直接使用 $task.fetch 原生请求，减少中间环节。
-2. 彻底清洗请求头，只保留 5 个核心参数，杜绝死锁。
-3. 增加 Body 清洗逻辑，防止数据格式错误导致卡顿。
-
-使用方法:
-你之前已经抓取成功了，更新代码后，直接去任务列表点击运行即可！
+长城汽车 - 算法暴力破解机
+说明：利用你抓包获取的 Secret 密钥，反向推导签名算法。
+使用：覆盖代码后，直接点击运行！
 */
 
-// -------------------------------------------------------
-// 🗄 数据库 Key
-// -------------------------------------------------------
-const KEY_AUTH = "duoxiong_gwm_auth";
-const KEY_GTOKEN = "duoxiong_gwm_gtoken";
-const KEY_SIGN = "duoxiong_gwm_sign";
-const KEY_TIME = "duoxiong_gwm_timestamp";
-const KEY_BODY = "duoxiong_gwm_body";
+const $ = new Env("长城算法破解");
 
-const SIGN_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
+// 引入加密库 (QX 环境需要在线加载)
+const cryptoJsUrl = "https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js";
 
-// -------------------------------------------------------
-// 🚦 逻辑入口
-// -------------------------------------------------------
+// 你的真实抓包数据 (基准)
+const sample = {
+    // 目标签名 (我们要算出一模一样的这个值)
+    targetSign: "5050fa993a834bac5b5e9a7193a1db1c44f18dcc5f457d66decb9342575385a3",
+    // 当时的时间戳
+    timestamp: "1769128608694",
+    // 你的密钥 (Headers里的 Secret)
+    secret: "8bc742859a7849ec9a924c979afa5a9a",
+    // 你的 Body
+    body: '{"userId":"U1386021354645749760"}',
+    // 你的 AppID
+    appId: "GWM-H5-110001"
+};
 
-// 判断是 重写(抓包) 还是 任务(签到)
-if (typeof $request !== "undefined") {
-  GetCookie();
-} else {
-  SignIn();
-}
+$task.fetch({ url: cryptoJsUrl }).then(response => {
+    // 1. 加载 CryptoJS 库
+    const CryptoJS = eval(response.body + "; CryptoJS;");
+    console.log("✅ 加密库就绪，开始碰撞测试...");
 
-// -------------------------------------------------------
-// 📡 1. 抓取逻辑 (保持稳定，只做记录)
-// -------------------------------------------------------
-function GetCookie() {
-  const url = $request.url;
-  
-  // 针对 sign/info 接口抓取 (你指定的)
-  if (url.indexOf("app/uc/sign/info") > -1) {
-    const headers = $request.headers;
-    let auth, gtoken;
+    const { targetSign, timestamp, secret, body, appId } = sample;
     
-    for (let key in headers) {
-      const k = key.toLowerCase();
-      if (k === "authorization") auth = headers[key];
-      if (k === "g-token") gtoken = headers[key];
+    // 2. 定义所有可能的算法组合
+    const combinations = [
+        { name: "Secret+Time+Body",  str: secret + timestamp + body },
+        { name: "Time+Secret+Body",  str: timestamp + secret + body },
+        { name: "Body+Secret+Time",  str: body + secret + timestamp },
+        { name: "Secret+Body+Time",  str: secret + body + timestamp },
+        { name: "AppID+Secret+Time", str: appId + secret + timestamp },
+        { name: "AppID+Secret+Time+Body", str: appId + secret + timestamp + body },
+        { name: "Secret+AppID+Time+Body", str: secret + appId + timestamp + body },
+        // 尝试加盐 (有些算法会拼接一个固定字符串)
+        { name: "Secret+Time+Body+Salt", str: secret + timestamp + body + "GWM" } 
+    ];
+
+    let found = false;
+
+    // 3. 开始循环测试
+    combinations.forEach(combo => {
+        // 计算 SHA256
+        const calc = CryptoJS.SHA256(combo.str).toString();
+        
+        console.log(`正在尝试 [${combo.name}]...`);
+        
+        if (calc.toLowerCase() === targetSign.toLowerCase()) {
+            found = true;
+            console.log("\n🎉🎉🎉 破解成功！🎉🎉🎉");
+            console.log(`✅ 正确算法是: [${combo.name}]`);
+            console.log(`✅ 签名结果: ${calc}`);
+            $notify("算法破解成功", "恭喜！", `算法模型: ${combo.name}`);
+        }
+    });
+
+    if (!found) {
+        console.log("\n❌ 常用组合未匹配，算法可能包含特殊排序或隐藏盐值。");
+        console.log("建议：请提供抓包列表中 ID 100 以前的 JS 文件（app.js 或 main.js）");
     }
-    
-    if (auth && gtoken) {
-      $prefs.setValueForKey(auth, KEY_AUTH);
-      $prefs.setValueForKey(gtoken, KEY_GTOKEN);
-      // 这里的 notify 可能会弹窗，证明抓取还在工作
-      // $notify("长城汽车", "✅ 身份已捕获", "请去任务列表执行签到");
-    }
-  }
-  
-  $done({});
-}
 
-// -------------------------------------------------------
-// 🚀 2. 签到逻辑 (原生 fetch，杜绝卡死)
-// -------------------------------------------------------
-function SignIn() {
-  console.log("🟢 [开始] 正在读取本地数据...");
-
-  // 1. 读取数据
-  const auth = $prefs.valueForKey(KEY_AUTH);
-  const gToken = $prefs.valueForKey(KEY_GTOKEN);
-  const sign = $prefs.valueForKey(KEY_SIGN);
-  const timestamp = $prefs.valueForKey(KEY_TIME);
-  let bodyStr = $prefs.valueForKey(KEY_BODY);
-
-  // 2. 核心数据完整性检查
-  if (!auth || !gToken || !sign) {
-    console.log("🔴 [错误] 数据缺失");
-    $notify("长城汽车", "🚫 无法运行", "缺少签名/Token，请重新抓取");
     $done();
-    return;
-  }
-
-  // 3. Body 清洗 (防止 Body 损坏导致卡死)
-  // 如果没抓到 Body，使用默认 ID 兜底，保证请求能发出去
-  if (!bodyStr || bodyStr === "undefined" || bodyStr === "[object Object]") {
-    console.log("🟠 [警告] Body 异常，使用默认 UserID");
-    bodyStr = JSON.stringify({ "userId": "U1386021354645749760" });
-  }
-
-  // 4. 组装请求 - ⚠️ 极度精简，防卡死关键 ⚠️
-  // 绝对不要带 Host, Connection, Origin, Content-Length
-  const myRequest = {
-    url: SIGN_URL,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json;charset=utf-8",
-      "Authtype": "BMP",
-      "AppID": "GWM-H5-110001",
-      "sourceApp": "GWM",
-      "Authorization": auth,
-      "G-Token": gToken,
-      "sign": sign,
-      "TimeStamp": timestamp
-    },
-    body: bodyStr
-  };
-
-  console.log("🟡 [发送] 正在发起网络请求...");
-
-  // 5. 使用原生 $task.fetch (不经过任何封装)
-  $task.fetch(myRequest).then(response => {
-    // 请求成功返回
-    console.log(`🟢 [响应] 状态码: ${response.statusCode}`);
-    
-    try {
-      const res = JSON.parse(response.body);
-      
-      if (res.code == 200 || res.success || (res.message && res.message.includes("成功"))) {
-        const score = res.data ? `积分: ${res.data}` : "";
-        $notify("长城汽车", "✅ 签到成功", `结果: ${res.message} ${score}`);
-      } else if (res.code == 401) {
-        $notify("长城汽车", "⚠️ 签名失效", "请点击App签到按钮刷新签名");
-      } else {
-        $notify("长城汽车", "⚠️ 签到反馈", res.message);
-      }
-    } catch (e) {
-      console.log("🔴 [解析错误] " + e);
-      $notify("长城汽车", "❌ 异常", "服务端返回非 JSON");
-    }
-    
-    $done(); // 结束脚本
-  }, reason => {
-    // 请求失败 (网络错误)
-    console.log("🔴 [网络错误] " + reason.error);
-    $notify("长城汽车", "🚫 网络超时", "请求未到达服务器，请切换网络");
-    $done(); // 结束脚本
-  });
-  
-  // 6. 设置一个 8 秒的强制结束，防止 UI 一直转圈
-  setTimeout(() => {
-    console.log("⚪ [超时熔断] 脚本强制结束");
+}, reason => {
+    console.log("❌ 网络错误: 无法加载加密库，请检查 QX 网络");
     $done();
-  }, 8000);
-}
+});
+
+function Env(t){return new class{constructor(t){this.name=t}msg(t,e,s){if("undefined"!=typeof $notify)$notify(t,e,s);console.log(`[${t}] ${e} - ${s}`)}done(){"undefined"!=typeof $done&&$done({})}}(t)}
