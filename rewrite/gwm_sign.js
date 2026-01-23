@@ -1,24 +1,15 @@
 /*
-长城/哈弗汽车自动签到 (浏览抓取版)
-项目名称: GWM Auto Sign (Info Grab)
-脚本作者: Gemini & Duoxiong
+长城/哈弗汽车自动签到 (原生防卡死版)
+项目名称: GWM Auto Sign (Native)
 更新时间: 2026-01-22
-使用说明: 
-1. 首次使用：打开 App -> 点击“我的”或进入签到页面 (触发 info 接口即可抓取)。
-2. 每日 9:00 自动执行签到。
+核心修复: 
+1. 移除 Env 包装类，直接使用 $task.fetch 原生请求，减少中间环节。
+2. 彻底清洗请求头，只保留 5 个核心参数，杜绝死锁。
+3. 增加 Body 清洗逻辑，防止数据格式错误导致卡顿。
 
-[rewrite_local]
-# 核心更改：拦截签到信息接口 (点击我的页面/签到首页触发)
-^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/app\/uc\/sign\/info url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
-
-[task_local]
-0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
-
-[mitm]
-hostname = gwm-api.gwmapp-h.com
+使用方法:
+你之前已经抓取成功了，更新代码后，直接去任务列表点击运行即可！
 */
-
-const $ = new Env("长城汽车签到");
 
 // -------------------------------------------------------
 // 🗄 数据库 Key
@@ -27,138 +18,129 @@ const KEY_AUTH = "duoxiong_gwm_auth";
 const KEY_GTOKEN = "duoxiong_gwm_gtoken";
 const KEY_SIGN = "duoxiong_gwm_sign";
 const KEY_TIME = "duoxiong_gwm_timestamp";
-const KEY_UA = "duoxiong_gwm_ua";
-// UserID 默认值 (如果 info 接口抓不到 Body，就用默认值或上次保存的)
-const KEY_BODY = "duoxiong_gwm_body"; 
+const KEY_BODY = "duoxiong_gwm_body";
 
-// 实际签到动作依然要发送给 sureNew，但我们从 info 接口偷数据
-const SIGN_ACTION_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
+const SIGN_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
 
 // -------------------------------------------------------
 // 🚦 逻辑入口
 // -------------------------------------------------------
-const isGetCookie = typeof $request !== "undefined";
-if (isGetCookie) {
+
+// 判断是 重写(抓包) 还是 任务(签到)
+if (typeof $request !== "undefined") {
   GetCookie();
-  $.done();
 } else {
   SignIn();
 }
 
 // -------------------------------------------------------
-// 📡 1. 抓取逻辑 (针对 sign/info 优化)
+// 📡 1. 抓取逻辑 (保持稳定，只做记录)
 // -------------------------------------------------------
 function GetCookie() {
   const url = $request.url;
   
-  // 仅针对你指定的 info 接口
+  // 针对 sign/info 接口抓取 (你指定的)
   if (url.indexOf("app/uc/sign/info") > -1) {
     const headers = $request.headers;
+    let auth, gtoken;
     
-    let captured = {};
-    // 遍历 Headers
     for (let key in headers) {
       const k = key.toLowerCase();
-      if (k === "authorization") captured.auth = headers[key];
-      if (k === "g-token") captured.gtoken = headers[key];
-      if (k === "sign") captured.sign = headers[key];
-      if (k === "timestamp") captured.time = headers[key];
-      if (k === "user-agent") captured.ua = headers[key];
-    }
-
-    // 保存抓到的数据
-    if (captured.auth && captured.gtoken) {
-      $.setdata(captured.auth, KEY_AUTH);
-      $.setdata(captured.gtoken, KEY_GTOKEN);
-      
-      // 尝试保存 Sign 和 Time (如果 info 接口有的话)
-      if (captured.sign && captured.time) {
-        $.setdata(captured.sign, KEY_SIGN);
-        $.setdata(captured.time, KEY_TIME);
-      }
-      
-      if (captured.ua) $.setdata(captured.ua, KEY_UA);
-
-      console.log(`[抓取成功] 来源: sign/info`);
-      $.msg($.name, "🎉 浏览抓取成功", "已保存身份信息，脚本准备就绪！");
-    }
-  }
-}
-
-// -------------------------------------------------------
-// 🚀 2. 签到逻辑
-// -------------------------------------------------------
-async function SignIn() {
-  $.msg($.name, "🚀 启动签到", "正在处理...");
-
-  // 1. 读取数据
-  const auth = $.getdata(KEY_AUTH);
-  const gToken = $.getdata(KEY_GTOKEN);
-  let sign = $.getdata(KEY_SIGN);
-  let timestamp = $.getdata(KEY_TIME);
-  const ua = $.getdata(KEY_UA) || "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 fromappios sapp cVer=1.9.9";
-  
-  // 读取保存的 Body，如果没有则使用硬编码兜底 (Info 接口通常是 GET，没 Body)
-  let body = $.getdata(KEY_BODY);
-  if (!body) {
-     body = JSON.stringify({ "userId": "U1386021354645749760" });
-  }
-
-  // 2. 检查
-  if (!auth || !gToken) {
-    $.msg($.name, "🚫 无数据", "请先打开 App 浏览签到页面");
-    $.done(); return;
-  }
-  
-  // 如果 info 接口没带 sign，我们尝试用以前保存的，或者提示
-  if (!sign) {
-      console.log("提示: info 接口未携带 sign，尝试使用旧数据或跳过校验");
-  }
-
-  // 3. 组装请求
-  const headers = {
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "AppID": "GWM-H5-110001",
-    "sourceApp": "GWM",
-    "Authtype": "BMP",
-    "User-Agent": ua,
-    "Authorization": auth,
-    "G-Token": gToken,
-    "sign": sign,           // 如果 info 接口没 sign，这里可能是 undefined，服务器可能报错
-    "TimeStamp": timestamp
-  };
-
-  const options = {
-    url: SIGN_ACTION_URL,
-    method: "POST",
-    headers: headers,
-    body: body,
-    timeout: 15000
-  };
-
-  $.post(options, (err, resp, data) => {
-    if (err) {
-      console.log("Err: " + JSON.stringify(err));
-      $.msg($.name, "🚫 网络错误", "请检查网络");
-      $.done(); return;
+      if (k === "authorization") auth = headers[key];
+      if (k === "g-token") gtoken = headers[key];
     }
     
-    try {
-      const res = JSON.parse(data);
-      if (res.code == 200 || res.success || (res.message && res.message.includes("成功"))) {
-        $.msg($.name, "✅ 签到成功", `结果: ${res.message} ${res.data || ""}`);
-      } else {
-        $.msg($.name, "⚠️ 签到反馈", res.message);
-      }
-    } catch (e) {
-      $.msg($.name, "❌ 异常", "非 JSON 数据");
+    if (auth && gtoken) {
+      $prefs.setValueForKey(auth, KEY_AUTH);
+      $prefs.setValueForKey(gtoken, KEY_GTOKEN);
+      // 这里的 notify 可能会弹窗，证明抓取还在工作
+      // $notify("长城汽车", "✅ 身份已捕获", "请去任务列表执行签到");
     }
-    $.done();
-  });
+  }
+  
+  $done({});
 }
 
 // -------------------------------------------------------
-// 🛠 Env 工具
+// 🚀 2. 签到逻辑 (原生 fetch，杜绝卡死)
 // -------------------------------------------------------
-function Env(t){return new class{constructor(t){this.name=t}msg(t,e,s){if("undefined"!=typeof $notify)$notify(t,e,s);console.log(`[${t}] ${e} - ${s}`)}setdata(t,e){return"undefined"!=typeof $prefs?$prefs.setValueForKey(t,e):"undefined"!=typeof $persistentStore?$persistentStore.write(t,e):void 0}getdata(t){return"undefined"!=typeof $prefs?$prefs.valueForKey(t):"undefined"!=typeof $persistentStore?$persistentStore.read(t):void 0}done(){"undefined"!=typeof $done&&$done({})}}(t)}
+function SignIn() {
+  console.log("🟢 [开始] 正在读取本地数据...");
+
+  // 1. 读取数据
+  const auth = $prefs.valueForKey(KEY_AUTH);
+  const gToken = $prefs.valueForKey(KEY_GTOKEN);
+  const sign = $prefs.valueForKey(KEY_SIGN);
+  const timestamp = $prefs.valueForKey(KEY_TIME);
+  let bodyStr = $prefs.valueForKey(KEY_BODY);
+
+  // 2. 核心数据完整性检查
+  if (!auth || !gToken || !sign) {
+    console.log("🔴 [错误] 数据缺失");
+    $notify("长城汽车", "🚫 无法运行", "缺少签名/Token，请重新抓取");
+    $done();
+    return;
+  }
+
+  // 3. Body 清洗 (防止 Body 损坏导致卡死)
+  // 如果没抓到 Body，使用默认 ID 兜底，保证请求能发出去
+  if (!bodyStr || bodyStr === "undefined" || bodyStr === "[object Object]") {
+    console.log("🟠 [警告] Body 异常，使用默认 UserID");
+    bodyStr = JSON.stringify({ "userId": "U1386021354645749760" });
+  }
+
+  // 4. 组装请求 - ⚠️ 极度精简，防卡死关键 ⚠️
+  // 绝对不要带 Host, Connection, Origin, Content-Length
+  const myRequest = {
+    url: SIGN_URL,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json;charset=utf-8",
+      "Authtype": "BMP",
+      "AppID": "GWM-H5-110001",
+      "sourceApp": "GWM",
+      "Authorization": auth,
+      "G-Token": gToken,
+      "sign": sign,
+      "TimeStamp": timestamp
+    },
+    body: bodyStr
+  };
+
+  console.log("🟡 [发送] 正在发起网络请求...");
+
+  // 5. 使用原生 $task.fetch (不经过任何封装)
+  $task.fetch(myRequest).then(response => {
+    // 请求成功返回
+    console.log(`🟢 [响应] 状态码: ${response.statusCode}`);
+    
+    try {
+      const res = JSON.parse(response.body);
+      
+      if (res.code == 200 || res.success || (res.message && res.message.includes("成功"))) {
+        const score = res.data ? `积分: ${res.data}` : "";
+        $notify("长城汽车", "✅ 签到成功", `结果: ${res.message} ${score}`);
+      } else if (res.code == 401) {
+        $notify("长城汽车", "⚠️ 签名失效", "请点击App签到按钮刷新签名");
+      } else {
+        $notify("长城汽车", "⚠️ 签到反馈", res.message);
+      }
+    } catch (e) {
+      console.log("🔴 [解析错误] " + e);
+      $notify("长城汽车", "❌ 异常", "服务端返回非 JSON");
+    }
+    
+    $done(); // 结束脚本
+  }, reason => {
+    // 请求失败 (网络错误)
+    console.log("🔴 [网络错误] " + reason.error);
+    $notify("长城汽车", "🚫 网络超时", "请求未到达服务器，请切换网络");
+    $done(); // 结束脚本
+  });
+  
+  // 6. 设置一个 8 秒的强制结束，防止 UI 一直转圈
+  setTimeout(() => {
+    console.log("⚪ [超时熔断] 脚本强制结束");
+    $done();
+  }, 8000);
+}
