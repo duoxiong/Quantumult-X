@@ -12,7 +12,7 @@
 ^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/user\/sign\/sureNew url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
 
 [task_local]
-0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
+0 0 12 * * ? https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
 
 [mitm]
 hostname = gwm-api.gwmapp-h.com
