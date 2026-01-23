@@ -1,22 +1,14 @@
 /*
-长城/哈弗汽车自动签到 (配置集成版)
-项目名称: GWM Auto Sign (Integrated)
+长城/哈弗汽车自动签到 (原生防卡死版)
+项目名称: GWM Auto Sign (Native)
 更新时间: 2026-01-22
-脚本特性:
-1. 集成配置：头部包含 Rewrite/Task/MitM，引用即可生效。
-2. 极速内核：采用 $task.fetch 原生请求，移除冗余头，杜绝卡死。
-3. 双向抓取：支持“我的页面”(Token) 和 “签到按钮”(Sign) 自动抓取。
+核心修复: 
+1. 移除 Env 包装类，直接使用 $task.fetch 原生请求，减少中间环节。
+2. 彻底清洗请求头，只保留 5 个核心参数，杜绝死锁。
+3. 增加 Body 清洗逻辑，防止数据格式错误导致卡顿。
 
-[rewrite_local]
-# 匹配 "我的页面(info)" 和 "签到按钮(sureNew)"
-^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/(app\/uc\/sign\/info|user\/sign\/sureNew) url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
-
-[task_local]
-# 每日 9:00 执行签到
-0 0 12 * * ? https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
-
-[mitm]
-hostname = gwm-api.gwmapp-h.com
+使用方法:
+你之前已经抓取成功了，更新代码后，直接去任务列表点击运行即可！
 */
 
 // -------------------------------------------------------
@@ -34,6 +26,7 @@ const SIGN_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew"
 // 🚦 逻辑入口
 // -------------------------------------------------------
 
+// 判断是 重写(抓包) 还是 任务(签到)
 if (typeof $request !== "undefined") {
   GetCookie();
 } else {
@@ -41,52 +34,27 @@ if (typeof $request !== "undefined") {
 }
 
 // -------------------------------------------------------
-// 📡 1. 抓取逻辑 (GetCookie)
+// 📡 1. 抓取逻辑 (保持稳定，只做记录)
 // -------------------------------------------------------
 function GetCookie() {
   const url = $request.url;
-  const headers = $request.headers;
-  let reqBody = $request.body;
   
-  // 临时存储
-  let val_auth, val_gtoken, val_sign, val_time;
-
-  // 1. 遍历 Headers (转小写匹配)
-  for (let key in headers) {
-    const k = key.toLowerCase();
-    if (k === "authorization") val_auth = headers[key];
-    if (k === "g-token") val_gtoken = headers[key];
-    if (k === "sign") val_sign = headers[key];
-    if (k === "timestamp") val_time = headers[key];
-  }
-
-  // 2. 场景A: 拦截 "我的" 页面 (sign/info) -> 只更新 Token
+  // 针对 sign/info 接口抓取 (你指定的)
   if (url.indexOf("app/uc/sign/info") > -1) {
-    if (val_auth && val_gtoken) {
-      $prefs.setValueForKey(val_auth, KEY_AUTH);
-      $prefs.setValueForKey(val_gtoken, KEY_GTOKEN);
-      console.log("[抓取] 身份信息(Token)已更新");
-      // 这里的通知可选，为了不打扰你，我注释掉了，需要可开启
-      // $notify("长城汽车", "✅ 身份已更新", "Token 已从“我的”页面捕获");
+    const headers = $request.headers;
+    let auth, gtoken;
+    
+    for (let key in headers) {
+      const k = key.toLowerCase();
+      if (k === "authorization") auth = headers[key];
+      if (k === "g-token") gtoken = headers[key];
     }
-  }
-
-  // 3. 场景B: 拦截 "签到" 按钮 (sureNew) -> 更新 签名 & Body
-  if (url.indexOf("user/sign/sureNew") > -1) {
-    if (val_sign && val_time) {
-      $prefs.setValueForKey(val_sign, KEY_SIGN);
-      $prefs.setValueForKey(val_time, KEY_TIME);
-      
-      // 处理 Body
-      if (reqBody) {
-        if (typeof reqBody === "object") {
-          try { reqBody = JSON.stringify(reqBody); } catch(e) {}
-        }
-        $prefs.setValueForKey(reqBody, KEY_BODY);
-      }
-      
-      console.log(`[抓取] 核心签名(Sign)已更新: ${val_sign}`);
-      $notify("长城汽车", "🎉 配置已完成", "核心签名已捕获，脚本准备就绪");
+    
+    if (auth && gtoken) {
+      $prefs.setValueForKey(auth, KEY_AUTH);
+      $prefs.setValueForKey(gtoken, KEY_GTOKEN);
+      // 这里的 notify 可能会弹窗，证明抓取还在工作
+      // $notify("长城汽车", "✅ 身份已捕获", "请去任务列表执行签到");
     }
   }
   
@@ -94,10 +62,10 @@ function GetCookie() {
 }
 
 // -------------------------------------------------------
-// 🚀 2. 签到逻辑 (原生 fetch 防卡死)
+// 🚀 2. 签到逻辑 (原生 fetch，杜绝卡死)
 // -------------------------------------------------------
 function SignIn() {
-  console.log("🟢 [开始] 准备签到...");
+  console.log("🟢 [开始] 正在读取本地数据...");
 
   // 1. 读取数据
   const auth = $prefs.valueForKey(KEY_AUTH);
@@ -106,20 +74,23 @@ function SignIn() {
   const timestamp = $prefs.valueForKey(KEY_TIME);
   let bodyStr = $prefs.valueForKey(KEY_BODY);
 
-  // 2. 检查
+  // 2. 核心数据完整性检查
   if (!auth || !gToken || !sign) {
     console.log("🔴 [错误] 数据缺失");
-    $notify("长城汽车", "🚫 数据缺失", "请先在 App 内浏览“我的”页面或点击签到");
+    $notify("长城汽车", "🚫 无法运行", "缺少签名/Token，请重新抓取");
     $done();
     return;
   }
 
-  // 3. Body 兜底
+  // 3. Body 清洗 (防止 Body 损坏导致卡死)
+  // 如果没抓到 Body，使用默认 ID 兜底，保证请求能发出去
   if (!bodyStr || bodyStr === "undefined" || bodyStr === "[object Object]") {
+    console.log("🟠 [警告] Body 异常，使用默认 UserID");
     bodyStr = JSON.stringify({ "userId": "U1386021354645749760" });
   }
 
-  // 4. 组装请求 (极简模式)
+  // 4. 组装请求 - ⚠️ 极度精简，防卡死关键 ⚠️
+  // 绝对不要带 Host, Connection, Origin, Content-Length
   const myRequest = {
     url: SIGN_URL,
     method: "POST",
@@ -136,33 +107,40 @@ function SignIn() {
     body: bodyStr
   };
 
-  // 5. 发送 (增加超时熔断)
-  const timer = setTimeout(() => {
-    console.log("⚪ [熔断] 请求超时");
-    $notify("长城汽车", "🚫 超时", "请求无响应，已强制结束");
-    $done();
-  }, 8000); // 8秒超时
+  console.log("🟡 [发送] 正在发起网络请求...");
 
+  // 5. 使用原生 $task.fetch (不经过任何封装)
   $task.fetch(myRequest).then(response => {
-    clearTimeout(timer); // 清除定时器
+    // 请求成功返回
+    console.log(`🟢 [响应] 状态码: ${response.statusCode}`);
     
     try {
       const res = JSON.parse(response.body);
+      
       if (res.code == 200 || res.success || (res.message && res.message.includes("成功"))) {
         const score = res.data ? `积分: ${res.data}` : "";
         $notify("长城汽车", "✅ 签到成功", `结果: ${res.message} ${score}`);
       } else if (res.code == 401) {
-        $notify("长城汽车", "⚠️ 签名失效", "请点击签到按钮刷新签名");
+        $notify("长城汽车", "⚠️ 签名失效", "请点击App签到按钮刷新签名");
       } else {
         $notify("长城汽车", "⚠️ 签到反馈", res.message);
       }
     } catch (e) {
+      console.log("🔴 [解析错误] " + e);
       $notify("长城汽车", "❌ 异常", "服务端返回非 JSON");
     }
-    $done();
+    
+    $done(); // 结束脚本
   }, reason => {
-    clearTimeout(timer);
-    $notify("长城汽车", "🚫 网络错误", "请求失败");
-    $done();
+    // 请求失败 (网络错误)
+    console.log("🔴 [网络错误] " + reason.error);
+    $notify("长城汽车", "🚫 网络超时", "请求未到达服务器，请切换网络");
+    $done(); // 结束脚本
   });
+  
+  // 6. 设置一个 8 秒的强制结束，防止 UI 一直转圈
+  setTimeout(() => {
+    console.log("⚪ [超时熔断] 脚本强制结束");
+    $done();
+  }, 8000);
 }
