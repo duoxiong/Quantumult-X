@@ -1,159 +1,86 @@
 /*
-长城/哈弗汽车自动签到
-项目名称: GWM Auto Sign (Lite Speed)
-脚本作者: Gemini & Duoxiong
+长城/哈弗汽车自动签到 (直连硬核版)
+文件路径: rewrite/gwm_sign.js
 更新时间: 2026-01-22
-版本特性: 
-1. 抓取逻辑保持不变（既然已成功，就不要动）。
-2. 签到逻辑“极度精简”，移除所有可能导致卡死的冗余头。
-3. 增加 8秒 极速超时设置，防止无限转圈。
-
-[rewrite_local]
-^https:\/\/gwm-api\.gwmapp-h\.com\/community-u\/v1\/(app\/uc\/sign\/info|user\/sign\/sureNew) url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js
-
-[task_local]
-0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
-
-[mitm]
-hostname = gwm-api.gwmapp-h.com
+说明: 基于抓包数据硬编码，无须Rewrite，直接运行任务即可。
 */
 
 const $ = new Env("长城汽车签到");
 
 // -------------------------------------------------------
-// 🗄 数据库 Key
+// 1. 核心配置区 (已内置你的鉴权数据)
 // -------------------------------------------------------
-const KEY_AUTH = "duoxiong_gwm_auth";
-const KEY_GTOKEN = "duoxiong_gwm_gtoken";
-const KEY_SIGN = "duoxiong_gwm_sign";
-const KEY_TIME = "duoxiong_gwm_timestamp";
-const KEY_BODY = "duoxiong_gwm_body";
-// UA 我们这次只存不强制用，签到时用默认的防卡死
-const KEY_UA = "duoxiong_gwm_ua"; 
 
-const SIGN_ACTION_URL = "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew";
-
-// -------------------------------------------------------
-// 🚦 逻辑入口
-// -------------------------------------------------------
-const isGetCookie = typeof $request !== "undefined";
-if (isGetCookie) {
-  GetCookie();
-  $.done();
-} else {
-  SignIn();
-}
-
-// -------------------------------------------------------
-// 📡 1. 抓取逻辑 (保持原样，稳定不动)
-// -------------------------------------------------------
-function GetCookie() {
-  const url = $request.url;
-  const headers = $request.headers;
-  let reqBody = $request.body;
+const config = {
+  // 真实的签到接口
+  url: "https://gwm-api.gwmapp-h.com/community-u/v1/user/sign/sureNew",
   
-  let capturedData = {};
-  for (let key in headers) {
-    const k = key.toLowerCase();
-    if (k === "authorization") capturedData.auth = headers[key];
-    if (k === "g-token") capturedData.gtoken = headers[key];
-    if (k === "sign") capturedData.sign = headers[key];
-    if (k === "timestamp") capturedData.time = headers[key];
-    if (k === "user-agent") capturedData.ua = headers[key];
-  }
+  // 你的 UserID
+  body: JSON.stringify({
+    "userId": "U1386021354645749760"
+  }),
 
-  if (url.indexOf("sign/info") > -1) {
-    if (capturedData.auth) $.setdata(capturedData.auth, KEY_AUTH);
-    if (capturedData.gtoken) $.setdata(capturedData.gtoken, KEY_GTOKEN);
-    // 仅日志，不弹窗
-    console.log("[身份更新] sign/info");
-  }
-
-  if (url.indexOf("sureNew") > -1) {
-    if (reqBody && typeof reqBody === "object") {
-      try { reqBody = JSON.stringify(reqBody); } catch(e) {}
-    }
-    if (capturedData.sign && capturedData.time && reqBody) {
-      $.setdata(capturedData.sign, KEY_SIGN);
-      $.setdata(capturedData.time, KEY_TIME);
-      $.setdata(reqBody, KEY_BODY);
-      if (capturedData.ua) $.setdata(capturedData.ua, KEY_UA);
-      
-      console.log(`[抓取成功] Sign: ${capturedData.sign}`);
-      $.msg($.name, "🎉 数据已就绪", "签到脚本配置完成，请手动运行任务测试！");
-    }
-  }
-}
-
-// -------------------------------------------------------
-// 🚀 2. 签到逻辑 (极速精简版)
-// -------------------------------------------------------
-async function SignIn() {
-  $.msg($.name, "🚀 启动签到", "正在发送请求...");
-
-  // 1. 读取数据
-  const auth = $.getdata(KEY_AUTH);
-  const gToken = $.getdata(KEY_GTOKEN);
-  const sign = $.getdata(KEY_SIGN);
-  const timestamp = $.getdata(KEY_TIME);
-  const body = $.getdata(KEY_BODY);
-
-  // 2. 快速校验
-  if (!auth || !gToken || !sign || !body) {
-    $.msg($.name, "🚫 数据缺失", "请先去App点击签到按钮抓取数据");
-    $.done(); return;
-  }
-
-  // 3. 组装最纯净的请求头
-  // 剔除 User-Agent、DeviceId 等所有非必须字段，防止网络层卡死
-  const headers = {
-    "Content-Type": "application/json;charset=utf-8",
+  // 请求头 (已移除 Host/Content-Length 等可能导致卡死的字段)
+  headers: {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://hippo-app-hw.gwmapp-h.com",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 fromappios sapp cVer=1.9.9",
     "AppID": "GWM-H5-110001",
     "sourceApp": "GWM",
     "Authtype": "BMP",
-    "Authorization": auth,
-    "G-Token": gToken,
-    "sign": sign,
-    "TimeStamp": timestamp
-  };
+    // 你的真实凭证
+    "Authorization": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJqd3RfdHlwZSI6MSwiand0VHlwZSI6MSwiYmVhbklkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImtleSI6ImJlYW4tYXBwLXVzZXIta2V5IiwiZ3dtQnJhbmQiOiJDQ0cwMDEiLCJpc3MiOiJnd3QgU2VydmVyIiwic3NvSWQiOiJVMTM4NjAyMTM1NDY0NTc0OTc2MCIsInJvbGVDb2RlIjoiYWRtaW4iLCJnd21ScyI6IjIiLCJnd0lkIjoiMzQ1MjQ2MTUzNzY0NzEyNDQ4MCIsImlhdCI6MTc2ODg3ODMwOSwiZXhwIjoxNzY5NDgzMTA5LCJjaGFubmVsIjoiNTlCMTEzMkItQzU5OS00NjRCLTgxMjgtOTc2Q0E1QTI0MkZDIn0.AJGlpQDYuEGYXLi1Go5dsEYFXk5QfxVhP6f-b_BymAoKa_COyi0vO_7kh3MTYFPpGFYbJ9aeYINYhv9_cr-dWdU2Koke7dW2w6nyed5_I2hgTdpa3L-6RHM9wdbOv7C1BRBUA56BfbGdSpcAzwNhcR8QS7r4mHN1ywEq-4kHG80LhFfuSNVsUa5WzwhbSpDdTO-ptN7GIxgun4Kh7dzAfuCixfGSo37NBuvaHzDgtc1FmB211Tl0gSWfP4FO2hz8TZjrGLLU4iWQWW-a1LRRI1orXMyxFOXZKhYBXVpG1WrMt66Fgdq5vF8b2U_tWHKxirUaHHbjqGopU-ifsB32u5KFQ7NvQK8",
+    "G-Token": "eyJnc24iOiJTMSIsImFsZyI6IlNIQTI1NndpdGhSU0EiLCJ0eXAiOiJKV1QifQ.eyJuYmYiOjE3Njg4NzgzMDksInNvdXJjZUFwcCI6IkdXTSIsInNvdXJjZVR5cGUiOiJJT1MiLCJhcHBJZCI6IkdXTS1BUFAtSU9TLTExMDAwMjAiLCJleHAiOjE3Njk0ODMxMDksImlhdCI6MTc2ODg3ODMwOSwidXNlcklkIjoiVTEzODYwMjEzNTQ2NDU3NDk3NjAiLCJkZXZpY2VJZCI6IjU5QjExMzJCLUM1OTktNDY0Qi04MTI4LTk3NkNBNUEyNDJGQyJ9.dv6u68meIV9NrsPGynu6GQoUFKKx4yofiw989DUbno4sU8ih62+xUV4/czG8/iIA8RJuuCEsKW1hln97aROkptQSwKAGHFdIe50aUzIzS2OsLsKxNc2ZECicLxisB6AHzc4Y9WSpBpEyQ2UmtWw9ZRckSdLov3dpxRLBKzCni2QvqVVl5Za2dvZeP/i5T0G2JmYaw3bJ++MS/gUybK2Eq2R1GZaL5v3ChFFN1DQR+L3GjAu7niPyBiFBCNVvV5I+xP2ggjQIXb3riINzwKiV0bIsOqt0jiRqUM1NNsWo8BcdfUWaXNYcv6ynKknWHvvZyrS+opVGksoeDpEV6uEWaQ==",
+    // 你的签名数据
+    "sign": "a70f912f8a1e1d0b6b848b60cc52591f3d2a12bea25ec781ad13f9e4192474ce",
+    "TimeStamp": "1769043392226"
+  }
+};
+
+// -------------------------------------------------------
+// 2. 执行逻辑
+// -------------------------------------------------------
+
+main();
+
+async function main() {
+  $.msg($.name, "🚀 发起签到", "正在直连服务器...");
 
   const options = {
-    url: SIGN_ACTION_URL,
+    url: config.url,
     method: "POST",
-    headers: headers,
-    body: body,
-    timeout: 8000 // 8秒强制超时，防止无限转圈
+    headers: config.headers,
+    body: config.body,
+    timeout: 15000 // 15秒超时设置，防止无限转圈
   };
 
-  // 4. 发送请求
-  console.log("正在请求: " + SIGN_ACTION_URL);
-  
   $.post(options, (err, resp, data) => {
-    // A. 处理网络错误
+    // 1. 处理网络层面的错误
     if (err) {
       console.log("❌ 网络错误: " + JSON.stringify(err));
-      // 这里的 timeout 错误通常是 "Request timeout"
-      $.msg($.name, "🚫 请求超时", "网络连接耗时过长，请切换网络后重试");
+      $.msg($.name, "🚫 网络请求失败", "请检查网络连接");
       $.done();
       return;
     }
 
-    // B. 处理业务响应
+    // 2. 处理业务层面的结果
     try {
-      console.log("Server Response: " + data);
-      const res = JSON.parse(data);
-      
-      if (res.code == 200 || res.success || (res.message && res.message.indexOf("成功") > -1)) {
-        const score = res.data ? ` (积分: ${res.data})` : "";
-        $.msg($.name, "✅ 签到成功", `结果: ${res.message}${score}`);
-      } else if (res.code == 401 || (res.message && res.message.indexOf("sign") > -1)) {
-        $.msg($.name, "⚠️ 签名失效", "请重新点击App内的签到按钮刷新签名");
+      console.log("服务器返回: " + data);
+      const result = JSON.parse(data);
+
+      // 判定成功的条件：code=200 或 success=true 或 消息包含“成功”
+      if (result.code == 200 || result.success || (result.message && result.message.includes("成功"))) {
+        const score = result.data ? ` (积分: ${result.data})` : "";
+        $.msg($.name, "✅ 签到成功", `结果: ${result.message || "OK"}${score}`);
       } else {
-        $.msg($.name, "⚠️ 签到反馈", res.message);
+        // 即使是“今日已签到”也算成功运行
+        $.msg($.name, "⚠️ 签到反馈", `状态: ${result.message}`);
       }
     } catch (e) {
-      console.log("解析错误: " + e);
-      $.msg($.name, "❌ 异常", "服务端返回数据异常");
+      console.log("解析异常: " + e);
+      // 如果返回的不是 JSON（比如HTML报错页），也提示出来
+      $.msg($.name, "❌ 数据异常", "服务端返回了非 JSON 格式数据");
     }
     
     $.done();
@@ -161,6 +88,25 @@ async function SignIn() {
 }
 
 // -------------------------------------------------------
-// 🛠 Env 工具
+// 3. 极简 Env 工具函数 (无需改动)
 // -------------------------------------------------------
-function Env(t){return new class{constructor(t){this.name=t}msg(t,e,s){if("undefined"!=typeof $notify)$notify(t,e,s);console.log(`[${t}] ${e} - ${s}`)}setdata(t,e){return"undefined"!=typeof $prefs?$prefs.setValueForKey(t,e):"undefined"!=typeof $persistentStore?$persistentStore.write(t,e):void 0}getdata(t){return"undefined"!=typeof $prefs?$prefs.valueForKey(t):"undefined"!=typeof $persistentStore?$persistentStore.read(t):void 0}done(){"undefined"!=typeof $done&&$done({})}}(t)}
+function Env(name) {
+  return new class {
+    constructor(name) { this.name = name; }
+    msg(title, sub, desc) {
+      if (typeof $notify !== "undefined") $notify(title, sub, desc);
+      console.log(`[${title}] ${sub} - ${desc}`);
+    }
+    post(opts, cb) {
+      if (typeof $task !== "undefined") {
+        $task.fetch(opts).then(
+          resp => cb(null, resp, resp.body),
+          err => cb(err, null, null)
+        );
+      }
+    }
+    done() {
+      if (typeof $done !== "undefined") $done({});
+    }
+  }(name);
+}
