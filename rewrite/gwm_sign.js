@@ -18,7 +18,7 @@ dns_exclusion_list = 119.29.29.90, 119.29.29.88, 119.28.28.28, 182.254.116.116
 0 9 * * * https://raw.githubusercontent.com/你的用户名/你的仓库/main/gwm_sign.js, tag=长城汽车签到, img-url=https://raw.githubusercontent.com/Orz-3/mini/master/Color/GWM.png, enabled=true
 
 4. [mitm] 模块添加：
-hostname = gwm-api.gwmapp-h.com
+hostname = *.gwmapp-h.com
 ---------------------------------------------------------
 */
 
