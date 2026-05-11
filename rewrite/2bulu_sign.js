@@ -1,114 +1,136 @@
 /*
-项目名称：两步路户外助手 - 存储容量签到 (完美克隆版)
-更新说明：精准提取 /dataSpace/claimCapacity 接口，无视 psign 算法，直接克隆完整请求体进行无损回放。
+项目名称：两步路户外助手 - 存储容量签到 (自动抓取版)
+项目功能：每日自动领取 10M 存储空间。
+更新内容：
+1. 采用与长城脚本一致的样式封装，内置 Env 环境。
+2. 开启自动抓取：App 内点击按钮即自动更新本地 Token、URL 和 Body。
+3. 预设兜底数据：内置你 5月11日 抓取的有效数据，更新脚本后即便不抓包也能立刻运行。
 
 ================ Quantumult X 配置指南 ================
 [MITM]
 hostname = helper.2bulu.com
 
 [rewrite_local]
-# 拦截签到领取动作 (在“存储空间管理”页面点击“签到领取”触发)
+# 核心抓取规则：拦截领取容量的 POST 请求
 ^https:\/\/helper\.2bulu\.com\/dataSpace\/claimCapacity url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js
 
 [task_local]
-# 每天早上 9:15 执行一次容量领取
+# 每天早上 9:15 执行一次
 15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js, tag=两步路容量签到, enabled=true
 =======================================================
 */
 
 const $ = new Env("两步路容量签到");
 
-const KEY_URL = "duoxiong_2bulu_url";
-const KEY_HEADERS = "duoxiong_2bulu_headers";
-const KEY_BODY = "duoxiong_2bulu_body";
+// ---------------------- 存储键名 ----------------------
+const KEY_URL = "duoxiong_2bulu_capacity_url";
+const KEY_HEADERS = "duoxiong_2bulu_capacity_headers";
+const KEY_BODY = "duoxiong_2bulu_capacity_body";
 
+// 🚦 逻辑入口
 if (typeof $request !== 'undefined') {
-    CaptureCapacitySign();
+    CaptureLogic();
 } else {
-    ExecuteCapacitySign();
+    SignInLogic();
 }
 
-// -------------------------------------------------------
-// 📡 1. 抓取逻辑 (点击“签到领取”瞬间触发)
-// -------------------------------------------------------
-function CaptureCapacitySign() {
+// ---------------------- 1. 自动抓取逻辑 ----------------------
+function CaptureLogic() {
     const url = $request.url;
     const headers = $request.headers;
     const body = $request.body;
 
-    if (url && headers && body) {
-        // 保存克隆三要素：URL(含 psign)、Headers(含 Cookie)、Body(含 authCode)
+    if (url.indexOf("claimCapacity") > -1 && body) {
         $.setdata(url, KEY_URL);
         $.setdata(JSON.stringify(headers), KEY_HEADERS);
         $.setdata(body, KEY_BODY);
 
-        $.msg($.name, "✅ 抓取成功", "已完美克隆容量签到数据包，请前往 QX 手动运行测试！");
-        console.log(`✅ [两步路] 成功捕获 URL: ${url}`);
-        console.log(`✅ [两步路] 成功捕获 Body: ${body}`);
-    } else {
-        console.log(`⚠️ [两步路] 抓取失败，缺少必要数据`);
+        $.msg($.name, "✅ 抓取成功", "已自动更新签到数据包，后续将按此凭证自动运行。");
+        console.log(`[两步路] 捕获新 URL: ${url}`);
+        console.log(`[两步路] 捕获新 Body: ${body}`);
     }
-    $done({});
+    $.done();
 }
 
-// -------------------------------------------------------
-// 🚀 2. 无损回放签到逻辑
-// -------------------------------------------------------
-function ExecuteCapacitySign() {
-    const savedUrl = $.getdata(KEY_URL);
-    const savedHeadersStr = $.getdata(KEY_HEADERS);
-    const savedBody = $.getdata(KEY_BODY);
+// ---------------------- 2. 签到执行逻辑 ----------------------
+function SignInLogic() {
+    // 优先读取本地抓取的数据
+    let signUrl = $.getdata(KEY_URL);
+    let signHeadersStr = $.getdata(KEY_HEADERS);
+    let signBody = $.getdata(KEY_BODY);
 
-    if (!savedUrl || !savedHeadersStr || !savedBody) {
-        $.msg($.name, "🚫 缺少数据", "请先前往两步路 App -> 我的 -> 存储空间管理，点击黄色的‘签到领取’按钮进行抓包。");
-        $done(); return;
+    // --- 兜底数据 (如果你还没抓包，或者数据被清理，脚本依然能跑) ---
+    if (!signUrl) {
+        console.log(">>> 未发现本地抓取数据，使用预设兜底凭证...");
+        signUrl = "https://helper.2bulu.com/dataSpace/claimCapacity?psign=4c9077afc211b04348b3c0db55e55813";
+        signHeadersStr = JSON.stringify({
+            "Host": "helper.2bulu.com",
+            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+            "Cookie": "authCode=A0KJFPhCXvchohO3MjeB%2FpCeYxyfqbx1vceit4NyIiG0VIg5eFQu5A%3D%3D; token=uOWVhtWzrcic1PzFlIUZww%3D%3D",
+            "User-Agent": "region:CN;lan:zh-Hans;OutdoorAssistantApplication/9.0.2 (lolaage.2bulu.zhushou; build:9.0.2.5; iOS 18.7.8) Alamofire/5.9.1",
+            "Encrypt-Type": "1"
+        });
+        signBody = "authCode=f0edb44c794b460aa6f5e3812c93ca2b&authType=1&deviceName=iPhone%2016%20Pro%20Max&p_appVersion=9.0.2&p_productType=0&p_terminalType=3&p_userId=63273918&sdkLevel=18.7.8&taskId=1&userId=63273918";
     }
 
-    let headers = {};
-    try {
-        headers = JSON.parse(savedHeadersStr);
-        // 清理可能导致强行阻断的 Header，保留 Cookie 和 Encrypt-Type
-        delete headers['Content-Length'];
-        delete headers['content-length'];
-        delete headers['Accept-Encoding'];
-    } catch (e) {
-        console.log("❌ [两步路] Headers 解析失败");
-        $done(); return;
-    }
+    const headers = JSON.parse(signHeadersStr);
+    // 清理可能导致报错的动态 Header
+    delete headers['Content-Length'];
+    delete headers['content-length'];
 
-    console.log(">>> 正在执行两步路容量领取任务...");
-    
-    const signOpts = {
-        url: savedUrl,
+    const opts = {
+        url: signUrl,
         method: "POST",
         headers: headers,
-        body: savedBody
+        body: signBody
     };
 
-    $task.fetch(signOpts).then(response => {
+    console.log(">>> 正在执行容量签到任务...");
+    $.post(opts, (err, resp, data) => {
         try {
-            const res = JSON.parse(response.body);
-            // {"code":0, "message":"success", "data":{...}}
-            if (res.code == 0 || res.message === "success") {
-                $.msg($.name, "✅ 领取成功", `恭喜！已成功领取 10M 存储空间。\n服务器反馈: ${res.message || "成功"}`);
-            } else if (response.body.includes("重复") || response.body.includes("已经") || res.code == 10001) {
-                $.msg($.name, "ℹ️ 重复领取", "您今天已经领取过 10M 容量了，明天再来吧！");
+            if (err) {
+                $.msg($.name, "🚫 网络错误", err);
             } else {
-                $.msg($.name, "⚠️ 领取反馈", res.message || "未知状态，请查看日志");
-                console.log(`⚠️ [两步路] 异常返回: ${response.body}`);
+                const res = JSON.parse(data);
+                if (res.code == 0 || res.message === "success") {
+                    $.msg($.name, "✅ 领取成功", "已成功扩容 10M。");
+                } else if (data.includes("重复") || data.includes("已经") || res.code == 10001) {
+                    $.msg($.name, "ℹ️ 重复签到", "今日任务已完成。");
+                } else {
+                    $.msg($.name, "⚠️ 签到异常", res.message || "请查看日志");
+                    console.log("[两步路] 服务器响应: " + data);
+                }
             }
         } catch (e) {
-            $.msg($.name, "❌ 解析异常", "接口返回格式错误，可能认证失效。");
-            console.log(`❌ [两步路] 原始响应数据: ${response.body}`);
+            $.msg($.name, "❌ 响应解析失败", "非 JSON 格式数据");
+            console.log("[两步路] 原始返回: " + data);
         }
-        $done();
-    }, reason => {
-        $.msg($.name, "🚫 网络错误", reason.error);
-        $done();
+        $.done();
     });
 }
 
-// -------------------------------------------------------
-// ⚙️ Env 环境类 (极简版)
-// -------------------------------------------------------
-function Env(t){return new class{constructor(t){this.name=t}msg(t,e,s){if("undefined"!=typeof $notify)$notify(t,e,s);console.log(`[${t}] ${e} - ${s}`)}setdata(t,e){return"undefined"!=typeof $prefs?$prefs.setValueForKey(t,e):"undefined"!=typeof $persistentStore?$persistentStore.write(t,e):void 0}getdata(t){return"undefined"!=typeof $prefs?$prefs.valueForKey(t):"undefined"!=typeof $persistentStore?$persistentStore.read(t):void 0}done(){"undefined"!=typeof $done&&$done({})}}(t)}
+// ---------------------- Env 环境类 (对齐长城脚本样式) ----------------------
+function Env(t, e) {
+    return new class {
+        constructor(t, e) {
+            this.name = t, this.startTime = (new Date).getTime(), Object.assign(this, e), console.log(`🔔${this.name}, 开始!`)
+        }
+        isQuanX() { return "undefined" != typeof $task }
+        getdata(t) { return this.isQuanX() ? $prefs.valueForKey(t) : null }
+        setdata(t, e) { return this.isQuanX() ? $prefs.setValueForKey(t, e) : null }
+        msg(t = this.name, e = "", s = "") { this.isQuanX() && $notify(t, e, s) }
+        post(t, e = (() => { })) {
+            if (this.isQuanX()) {
+                t.method = "POST";
+                $task.fetch(t).then(t => {
+                    const { statusCode: s, headers: r, body: o } = t;
+                    e(null, { status: s, headers: r, body: o }, o)
+                }, t => e(t && t.error || "UndefinedError"))
+            }
+        }
+        done(t = {}) {
+            const e = (new Date).getTime(), s = (e - this.startTime) / 1e3;
+            console.log(`🔔${this.name}, 结束! 🕛 ${s} 秒`), $done(t)
+        }
+    }(t, e)
+}
