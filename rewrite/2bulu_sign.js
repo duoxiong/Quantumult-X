@@ -1,111 +1,123 @@
 /*
-脚本名称：两步路户外助手 自动签到 (智能抓包回放版)
-更新内容：
-1. 采用“全栈嗅探+无损回放”机制，自动捕获未知的签到接口和身份凭证。
-2. 支持自动区分 GET/POST 请求，并动态重组 Headers。
+项目名称：两步路户外助手 - 自动签到 (两步验证版)
+更新说明：采用抓包+两步验证机制，规避每日一次的测试限制。
+
+================ Quantumult X 配置指南 ================
+请将下方配置分别添加到 Quantumult X 对应的模块中：
+
+[MITM]
+hostname = *.2bulu.com, api.2bulu.com
+
+[rewrite_local]
+# 拦截个人信息接口获取凭证 (打开 App 进入“我的”页面触发)
+^https:\/\/api\.2bulu\.com\/user\/info url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js
+
+[task_local]
+# 每天早上 9:00 执行一次签到
+0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js, tag=两步路签到, enabled=true
+=======================================================
 */
 
 const $ = new Env("两步路签到");
 
-const KEY_URL = "duoxiong_2bulu_url";
-const KEY_METHOD = "duoxiong_2bulu_method";
+const KEY_AUTH = "duoxiong_2bulu_auth";
 const KEY_HEADERS = "duoxiong_2bulu_headers";
-const KEY_BODY = "duoxiong_2bulu_body";
+
+// ---------------------- 核心接口 ----------------------
+const URL_INFO = "https://api.2bulu.com/user/info";       // 第一步：用于测试 Token 的接口 (可无限重复)
+const URL_SIGN = "https://api.2bulu.com/point/sign_in";   // 第二步：真正的签到接口
 
 if (typeof $request !== 'undefined') {
-    CaptureRequest();
+    CaptureToken();
 } else {
-    SignIn();
+    RunTwoSteps();
 }
 
-// ---------------------- 1. 智能抓取逻辑 ----------------------
-function CaptureRequest() {
-    const url = $request.url;
-    const method = $request.method;
-    const headers = $request.headers;
-    const body = $request.body || "";
-
-    // 过滤掉无关的页面加载请求
-    if (url.match(/\.(jpg|png|gif|css|html|webp)/i)) {
-        $.done({}); return;
-    }
-
-    // 保存该请求的所有原生特征
-    $.setdata(url, KEY_URL);
-    $.setdata(method, KEY_METHOD);
-    $.setdata(JSON.stringify(headers), KEY_HEADERS);
-    $.setdata(body, KEY_BODY);
-
-    // 提取接口最后一段路径作为提示
-    const pathInfo = url.split('.com')[1] || url;
-    $.msg($.name, "✅ 捕获成功", "已锁定签到接口，可前往 QX 手动运行测试！\n接口: " + pathInfo);
-    console.log(`[两步路] 抓取 URL: ${url}`);
-    
-    $.done({});
-}
-
-// ---------------------- 2. 无损回放逻辑 ----------------------
-function SignIn() {
-    const url = $.getdata(KEY_URL);
-    const method = $.getdata(KEY_METHOD) || "POST";
-    const headersStr = $.getdata(KEY_HEADERS);
-    const body = $.getdata(KEY_BODY);
-
-    if (!url || !headersStr) {
-        $.msg($.name, "🚫 缺少数据", "请先在【两步路户外助手】APP 内手动点一次签到进行抓包。");
-        $.done(); return;
-    }
-
-    let headers = {};
-    try {
-        headers = JSON.parse(headersStr);
-        // 清理可能导致重放失败的特定请求头
-        delete headers['Content-Length'];
-        delete headers['content-length'];
-        delete headers['Accept-Encoding']; // 防止返回乱码
-    } catch (e) {
-        console.log("[两步路] Headers 解析失败");
-    }
-
-    const opts = {
-        url: url,
-        method: method,
-        headers: headers,
-        body: body
-    };
-
-    // 如果是 GET 请求，必须剔除 Body，否则 QX 会报错
-    if (method.toUpperCase() === "GET") {
-        delete opts.body;
-        $.get(opts, handleResponse);
-    } else {
-        $.post(opts, handleResponse);
-    }
-}
-
-// ---------------------- 3. 结果处理逻辑 ----------------------
-function handleResponse(err, resp, data) {
-    if (err) {
-        $.msg($.name, "🚫 网络错误", err);
-    } else {
-        try {
-            const res = JSON.parse(data);
-            // 兼容各类常见的 API 成功状态码
-            if (res.code == 0 || res.code == 200 || res.status == 1 || res.success) {
-                $.msg($.name, "✅ 签到成功", `反馈: ${res.message || res.msg || "任务完成"}`);
-            } else if (JSON.stringify(res).includes("已经") || JSON.stringify(res).includes("重复")) {
-                $.msg($.name, "ℹ️ 重复签到", "今日已经签过啦！");
-            } else {
-                $.msg($.name, "⚠️ 签到异常", res.message || res.msg || "请查看日志");
-                console.log(`[两步路] 完整返回: ${data}`);
-            }
-        } catch (e) {
-            $.msg($.name, "❌ 解析失败", "服务器返回格式非 JSON");
-            console.log(`[两步路] 返回原文: ${data}`);
-        }
+// ---------------------- 1. 抓取逻辑 (可重复测试) ----------------------
+function CaptureToken() {
+    if ($request.headers) {
+        // 保存所有 Headers，两步路通常把 Token 放在 Header 里
+        $.setdata(JSON.stringify($request.headers), KEY_HEADERS);
+        $.msg($.name, "✅ 抓取成功", "已捕获个人中心凭证，现在可前往 QX 手动运行脚本测试！");
+        console.log(`[两步路] 凭证抓取成功: ${$request.url}`);
     }
     $.done();
 }
 
-// ---------------------- Env 环境类 ----------------------
-function Env(t, e) { class s { constructor(t) { this.env = t } send(t, e = "GET") { t = "string" == typeof t ? { url: t } : t; let s = this.get; return "POST" === e && (s = this.post), new Promise((e, i) => { s.call(this, t, (t, s, r) => { t ? i(t) : e(s) }) }) } get(t) { return this.send.call(this.env, t) } post(t) { return this.send.call(this.env, t, "POST") } } return new class { constructor(t, e) { this.name = t, this.http = new s(this), this.data = null, this.dataFile = "box.dat", this.startTime = (new Date).getTime(), Object.assign(this, e) } isNode() { return "undefined" != typeof module && !!module.exports } isQuanX() { return "undefined" != typeof $task } isSurge() { return "undefined" != typeof $httpClient && "undefined" == typeof $loon } isLoon() { return "undefined" != typeof $loon } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? t[i] : e } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), a = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(a); e[r] = t, s = this.setval(JSON.stringify(e), i) } catch (e) { const o = {}; o[r] = t, s = this.setval(JSON.stringify(o), i) } } else s = this.setval(t, e); return s } getval(t) { return this.isSurge() || this.isLoon() ? $persistentStore.read(t) : this.isQuanX() ? $prefs.valueForKey(t) : null } setval(t, e) { return this.isSurge() || this.isLoon() ? $persistentStore.write(t, e) : this.isQuanX() ? $prefs.setValueForKey(t, e) : null } get(t, e = (() => { })) { if (this.isSurge() || this.isLoon()) $httpClient.get(t, (t, s, i) => { !t && s && (s.body = i, s.statusCode = s.status ? s.status : s.statusCode), e(t, s, i) }); else if (this.isQuanX()) $task.fetch(t).then(t => { const { statusCode: s, statusCode: i, headers: r, body: o } = t; e(null, { status: s, statusCode: i, headers: r, body: o }, o) }, t => e(t && t.error || "UndefinedError")) } post(t, e = (() => { })) { if (this.isSurge() || this.isLoon()) $httpClient.post(t, (t, s, i) => { !t && s && (s.body = i, s.statusCode = s.status ? s.status : s.statusCode), e(t, s, i) }); else if (this.isQuanX()) { t.method = "POST"; $task.fetch(t).then(t => { const { statusCode: s, statusCode: i, headers: r, body: o } = t; e(null, { status: s, statusCode: i, headers: r, body: o }, o) }, t => e(t && t.error || "UndefinedError")) } } msg(e = t, s = "", i = "", r) { if (this.isSurge() || this.isLoon()) $notification.post(e, s, i); else if (this.isQuanX()) $notify(e, s, i) } log(...t) { console.log(t.join("\n")) } logErr(t) { console.log(`❗${this.name}, 错误!\n${t}`) } wait(t) { return new Promise(e => setTimeout(e, t)) } done(t = {}) { $done(t) } }(t, e) }
+// ---------------------- 2. 两步走运行逻辑 ----------------------
+async function RunTwoSteps() {
+    const headersStr = $.getdata(KEY_HEADERS);
+    if (!headersStr) {
+        $.msg($.name, "🚫 缺少凭证", "请先打开两步路 App 的‘我的’页面进行抓包。");
+        $.done(); return;
+    }
+
+    let baseHeaders = {};
+    try {
+        baseHeaders = JSON.parse(headersStr);
+        // 清理可能导致网络请求报错的 Header
+        delete baseHeaders['Content-Length'];
+        delete baseHeaders['content-length'];
+        delete baseHeaders['Accept-Encoding'];
+    } catch (e) {
+        console.log("[两步路] Headers 解析失败");
+        $.done(); return;
+    }
+
+    // --- 第一步：测试性获取积分余额 (用来代替签到测试) ---
+    console.log(">>> 步骤 1: 正在验证 Token 有效性并获取积分...");
+    const infoOpts = { url: URL_INFO, headers: baseHeaders };
+    
+    $.get(infoOpts, (err, resp, data) => {
+        try {
+            const res = JSON.parse(data);
+            if (res.code == 0 || res.data) {
+                const points = res.data.userPoint !== undefined ? res.data.userPoint : "未知";
+                console.log(`✅ Token 有效！当前积分: ${points}`);
+                
+                // --- 第二步：既然第一步通了，执行真正的签到 ---
+                ExecuteSignIn(baseHeaders, points);
+            } else {
+                $.msg($.name, "❌ Token 验证失败", "凭证可能已失效，请重新打开 App 刷新‘我的’页面抓包。");
+                console.log(`[两步路] 验证返回: ${data}`);
+                $.done();
+            }
+        } catch (e) {
+            $.msg($.name, "❌ 验证请求异常", "无法连接两步路服务器或返回非 JSON。");
+            console.log(`[两步路] 网络数据: ${data}`);
+            $.done();
+        }
+    });
+}
+
+// ---------------------- 3. 真正执行签到 ----------------------
+function ExecuteSignIn(headers, currentPoints) {
+    console.log(">>> 步骤 2: 正在执行每日签到...");
+    const signOpts = {
+        url: URL_SIGN,
+        method: "POST", // 签到通常是 POST
+        headers: headers,
+        body: "" 
+    };
+
+    $.post(signOpts, (err, resp, data) => {
+        try {
+            const res = JSON.parse(data);
+            if (res.code == 0 || res.message === "success" || res.msg === "success") {
+                $.msg($.name, "✅ 签到成功", `原有积分: ${currentPoints}\n反馈: ${res.message || res.msg || "任务完成"}`);
+            } else if (data.includes("重复") || data.includes("已经")) {
+                $.msg($.name, "ℹ️ 重复签到", `原有积分: ${currentPoints}\n提示: 今日已经签到过了哦。`);
+            } else {
+                $.msg($.name, "⚠️ 签到异常", res.message || res.msg || "请检查日志");
+                console.log(`[两步路] 签到报错原文: ${data}`);
+            }
+        } catch (e) {
+            $.msg($.name, "❌ 签到解析异常", "签到接口返回非 JSON 数据");
+            console.log(`[两步路] 签到原始数据: ${data}`);
+        }
+        $.done();
+    });
+}
+
+// ---------------------- Env 环境类 (精简版) ----------------------
+function Env(t){return new class{constructor(t){this.name=t}getdata(t){return $prefs.valueForKey(t)}setdata(t,e){return $prefs.setValueForKey(t,e)}msg(t,e,s){$notify(t,e,s)}get(t,e){t.method="GET";$task.fetch(t).then(t=>e(null,t,t.body),t=>e(t.error))}post(t,e){t.method="POST";$task.fetch(t).then(t=>e(null,t,t.body),t=>e(t.error))}done(){$done({})}}(t)}
