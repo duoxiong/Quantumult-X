@@ -1,145 +1,95 @@
 /*
-项目名称：两步路户外助手自动签到 (高频验证版)
-更新说明：采用抓包+两步验证机制，规避每日一次的测试限制，确保一次成功。
-
-================ Quantumult X 配置指南 ================
-[MITM]
-hostname = *.2bulu.com, api.2bulu.com
-
-[rewrite_local]
-# 拦截个人信息接口获取凭证 (打开 App 进入“我的”页面触发)
-^https:\/\/api\.2bulu\.com\/user\/info url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js
-
-[task_local]
-# 每天早上 9:00 执行一次签到
-0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js, tag=两步路签到, enabled=true
-=======================================================
+项目名称：两步路户外助手 - 活跃度自动执行 (全量回放版)
+更新说明：针对两步路 helper.2bulu.com 新接口，全量截获带 psign 的 URL 和 Cookie 进行无损重放。
 */
 
-const $ = new Env("两步路签到");
+const $ = new Env("两步路活跃");
 
-const KEY_AUTH = "duoxiong_2bulu_auth";
+const KEY_URL = "duoxiong_2bulu_url";
 const KEY_HEADERS = "duoxiong_2bulu_headers";
 
-// -------------------------------------------------------
-// ⚙️ 核心接口配置
-// -------------------------------------------------------
-const URL_INFO = "https://api.2bulu.com/user/info";       // 第一步：用于测试 Token 的接口 (可无限重复)
-const URL_SIGN = "https://api.2bulu.com/point/sign_in";   // 第二步：真正的签到接口
-
-// -------------------------------------------------------
-// 🚦 逻辑入口
-// -------------------------------------------------------
 if (typeof $request !== 'undefined') {
-    CaptureToken();
+    CaptureRequest();
 } else {
-    RunTwoSteps();
+    ExecuteTask();
 }
 
 // -------------------------------------------------------
-// 📡 1. 抓取逻辑 (打开“我的”页面触发)
+// 📡 1. 抓取逻辑：保存完整的 URL 和 Headers
 // -------------------------------------------------------
-function CaptureToken() {
-    if ($request.headers) {
-        // 保存所有原生 Headers
-        $.setdata(JSON.stringify($request.headers), KEY_HEADERS);
-        $.msg($.name, "✅ 抓取成功", "已捕获个人中心凭证，现在可前往 QX 任务列表手动运行测试！");
-        console.log(`✅ [两步路] 凭证抓取成功: ${$request.url}`);
+function CaptureRequest() {
+    const url = $request.url;
+    const headers = $request.headers;
+
+    // 只有包含 authCode 的鉴权 URL 我们才抓取
+    if (url.includes("authCode=") || url.includes("psign=")) {
+        $.setdata(url, KEY_URL);
+        $.setdata(JSON.stringify(headers), KEY_HEADERS);
+        
+        // 提取接口名称用于提示
+        const matchInfo = url.match(/helper\.2bulu\.com\/([^\?]+)/);
+        const apiName = matchInfo ? matchInfo[1] : "未知接口";
+
+        $.msg($.name, "✅ 凭证捕获成功", `已锁定接口: ${apiName}\n完整 URL 及 Cookie 已保存，可前往 QX 手动运行测试。`);
+        console.log(`✅ [两步路] 抓取成功: ${url}`);
     }
     $done({});
 }
 
 // -------------------------------------------------------
-// 🚀 2. 两步验证与运行逻辑
+// 🚀 2. 任务执行逻辑：原样重放
 // -------------------------------------------------------
-function RunTwoSteps() {
+function ExecuteTask() {
+    const savedUrl = $.getdata(KEY_URL);
     const headersStr = $.getdata(KEY_HEADERS);
-    if (!headersStr) {
-        $.msg($.name, "🚫 缺少凭证", "请先打开两步路 App，进入‘我的’页面进行抓包。");
+
+    if (!savedUrl || !headersStr) {
+        $.msg($.name, "🚫 缺少数据", "请先打开两步路 App 触发对应操作 (如刷新个人页或点赞) 进行抓包。");
         $done(); return;
     }
 
-    let baseHeaders = {};
+    let headers = {};
     try {
-        baseHeaders = JSON.parse(headersStr);
-        // 清理可能导致网络请求报错的冲突 Header
-        delete baseHeaders['Content-Length'];
-        delete baseHeaders['content-length'];
-        delete baseHeaders['Accept-Encoding'];
+        headers = JSON.parse(headersStr);
+        // 清理可能导致乱码或冲突的请求头
+        delete headers['Content-Length'];
+        delete headers['content-length'];
+        delete headers['Accept-Encoding'];
     } catch (e) {
         console.log("❌ [两步路] Headers 解析失败");
         $done(); return;
     }
 
-    // --- 第一步：测试性获取积分余额 ---
-    console.log(">>> 步骤 1: 正在验证 Token 有效性并获取当前积分...");
-    const infoOpts = { 
-        url: URL_INFO, 
-        method: "GET",
-        headers: baseHeaders 
+    console.log(`>>> 准备重放请求: ${savedUrl}`);
+
+    const opts = {
+        url: savedUrl,
+        method: "GET", // 两步路新接口几乎全是 GET
+        headers: headers
     };
-    
-    $task.fetch(infoOpts).then(response => {
+
+    $task.fetch(opts).then(response => {
         try {
             const res = JSON.parse(response.body);
-            if (res.code == 0 || res.data) {
-                const points = res.data.userPoint !== undefined ? res.data.userPoint : "未知";
-                console.log(`✅ Token 验证有效！当前积分: ${points}`);
-                
-                // --- 第二步：验证成功，执行真正的签到 ---
-                ExecuteSignIn(baseHeaders, points);
+            // 两步路的成功标识通常是 code=0 或 code=200
+            if (res.code == 0 || res.code == 200 || res.success) {
+                $.msg($.name, "✅ 任务执行成功", `响应信息: ${res.message || res.msg || "操作成功"}`);
             } else {
-                $.msg($.name, "❌ Token 验证失败", "凭证可能已失效，请重新打开 App 刷新‘我的’页面。");
-                console.log(`❌ [两步路] 验证返回: ${response.body}`);
-                $done();
+                $.msg($.name, "⚠️ 任务异常", res.message || res.msg || "未知错误，请检查日志");
+                console.log(`⚠️ [两步路] 异常返回: ${response.body}`);
             }
         } catch (e) {
-            $.msg($.name, "❌ 验证请求异常", "无法解析服务器响应数据。");
-            console.log(`❌ [两步路] 网络数据: ${response.body}`);
-            $done();
+            $.msg($.name, "❌ 响应解析失败", "服务器可能返回了非 JSON 数据。");
+            console.log(`❌ [两步路] 原始返回: ${response.body}`);
         }
+        $done();
     }, reason => {
-        $.msg($.name, "🚫 网络超时或错误", reason.error);
+        $.msg($.name, "🚫 网络请求失败", reason.error);
         $done();
     });
 }
 
 // -------------------------------------------------------
-// 🎯 3. 真正执行签到
-// -------------------------------------------------------
-function ExecuteSignIn(headers, currentPoints) {
-    console.log(">>> 步骤 2: 正在执行每日签到...");
-    const signOpts = {
-        url: URL_SIGN,
-        method: "POST", 
-        headers: headers,
-        body: "" // 签到接口通常只需 POST 空 Body 即可，鉴权在 Header
-    };
-
-    $task.fetch(signOpts).then(response => {
-        try {
-            const res = JSON.parse(response.body);
-            // 兼容多种成功状态标识
-            if (res.code == 0 || res.message === "success" || res.msg === "success") {
-                $.msg($.name, "✅ 签到成功", `当前积分: ${currentPoints}\n反馈详情: ${res.message || res.msg || "任务完成"}`);
-            } else if (response.body.includes("重复") || response.body.includes("已经")) {
-                $.msg($.name, "ℹ️ 重复签到", `当前积分: ${currentPoints}\n提示信息: 您今天已经签到过了。`);
-            } else {
-                $.msg($.name, "⚠️ 签到异常", res.message || res.msg || "请进入 QX 查看具体日志");
-                console.log(`⚠️ [两步路] 签到报错原文: ${response.body}`);
-            }
-        } catch (e) {
-            $.msg($.name, "❌ 签到解析异常", "签到接口返回非 JSON 数据，可能接口已变更。");
-            console.log(`❌ [两步路] 签到原始数据: ${response.body}`);
-        }
-        $done();
-    }, reason => {
-        $.msg($.name, "🚫 签到网络错误", reason.error);
-        $done();
-    });
-}
-
-// -------------------------------------------------------
-// ⚙️ Env 环境类 (单文件无依赖极简版)
+// ⚙️ Env 环境类 (精简兼容版)
 // -------------------------------------------------------
 function Env(t){return new class{constructor(t){this.name=t}msg(t,e,s){if("undefined"!=typeof $notify)$notify(t,e,s);console.log(`[${t}] ${e} - ${s}`)}setdata(t,e){return"undefined"!=typeof $prefs?$prefs.setValueForKey(t,e):"undefined"!=typeof $persistentStore?$persistentStore.write(t,e):void 0}getdata(t){return"undefined"!=typeof $prefs?$prefs.valueForKey(t):"undefined"!=typeof $persistentStore?$persistentStore.read(t):void 0}done(){"undefined"!=typeof $done&&$done({})}}(t)}
