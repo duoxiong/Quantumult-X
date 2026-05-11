@@ -1,10 +1,10 @@
 /*
-项目名称：两步路户外助手 - 存储容量签到 (自动抓取版)
+项目名称：两步路户外助手 - 存储容量签到 (自动抓取+兜底版)
 项目功能：每日自动领取 10M 存储空间。
-更新内容：
-1. 采用与长城脚本一致的样式封装，内置 Env 环境。
-2. 开启自动抓取：App 内点击按钮即自动更新本地 Token、URL 和 Body。
-3. 预设兜底数据：内置你 5月11日 抓取的有效数据，更新脚本后即便不抓包也能立刻运行。
+更新说明：
+1. 兼容两步路特有的 errCode 响应机制，解决 -2 报错提示。
+2. 支持自动抓取：App 内点击“签到领取”即可自动同步最新凭证。
+3. 预设硬编码兜底：内置 5月11日 抓取的有效数据，更新即用。
 
 ================ Quantumult X 配置指南 ================
 [MITM]
@@ -27,14 +27,18 @@ const KEY_URL = "duoxiong_2bulu_capacity_url";
 const KEY_HEADERS = "duoxiong_2bulu_capacity_headers";
 const KEY_BODY = "duoxiong_2bulu_capacity_body";
 
+// -------------------------------------------------------
 // 🚦 逻辑入口
+// -------------------------------------------------------
 if (typeof $request !== 'undefined') {
     CaptureLogic();
 } else {
     SignInLogic();
 }
 
-// ---------------------- 1. 自动抓取逻辑 ----------------------
+// -------------------------------------------------------
+// 📡 1. 自动抓取逻辑 (点击“签到领取”触发)
+// -------------------------------------------------------
 function CaptureLogic() {
     const url = $request.url;
     const headers = $request.headers;
@@ -45,36 +49,39 @@ function CaptureLogic() {
         $.setdata(JSON.stringify(headers), KEY_HEADERS);
         $.setdata(body, KEY_BODY);
 
-        $.msg($.name, "✅ 抓取成功", "已自动更新签到数据包，后续将按此凭证自动运行。");
-        console.log(`[两步路] 捕获新 URL: ${url}`);
-        console.log(`[两步路] 捕获新 Body: ${body}`);
+        $.msg($.name, "✅ 抓取成功", "已锁定存储扩容接口，后续将按此凭证自动运行。");
+        console.log(`[两步路] 成功捕获 URL: ${url}`);
+        console.log(`[两步路] 成功捕获 Body: ${body}`);
     }
     $.done();
 }
 
-// ---------------------- 2. 签到执行逻辑 ----------------------
+// -------------------------------------------------------
+// 🚀 2. 签到执行逻辑
+// -------------------------------------------------------
 function SignInLogic() {
-    // 优先读取本地抓取的数据
+    // 优先从本地存储读取抓取到的数据
     let signUrl = $.getdata(KEY_URL);
     let signHeadersStr = $.getdata(KEY_HEADERS);
     let signBody = $.getdata(KEY_BODY);
 
-    // --- 兜底数据 (如果你还没抓包，或者数据被清理，脚本依然能跑) ---
+    // --- 💡 硬编码兜底数据 (基于 2026-05-11 抓包数据) ---
     if (!signUrl) {
-        console.log(">>> 未发现本地抓取数据，使用预设兜底凭证...");
+        console.log(">>> 未发现本地抓取数据，启动硬编码兜底程序...");
         signUrl = "https://helper.2bulu.com/dataSpace/claimCapacity?psign=4c9077afc211b04348b3c0db55e55813";
         signHeadersStr = JSON.stringify({
             "Host": "helper.2bulu.com",
             "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
             "Cookie": "authCode=A0KJFPhCXvchohO3MjeB%2FpCeYxyfqbx1vceit4NyIiG0VIg5eFQu5A%3D%3D; token=uOWVhtWzrcic1PzFlIUZww%3D%3D",
             "User-Agent": "region:CN;lan:zh-Hans;OutdoorAssistantApplication/9.0.2 (lolaage.2bulu.zhushou; build:9.0.2.5; iOS 18.7.8) Alamofire/5.9.1",
-            "Encrypt-Type": "1"
+            "Encrypt-Type": "1",
+            "Accept": "*/*"
         });
         signBody = "authCode=f0edb44c794b460aa6f5e3812c93ca2b&authType=1&deviceName=iPhone%2016%20Pro%20Max&p_appVersion=9.0.2&p_productType=0&p_terminalType=3&p_userId=63273918&sdkLevel=18.7.8&taskId=1&userId=63273918";
     }
 
     const headers = JSON.parse(signHeadersStr);
-    // 清理可能导致报错的动态 Header
+    // 清理动态请求头
     delete headers['Content-Length'];
     delete headers['content-length'];
 
@@ -85,31 +92,38 @@ function SignInLogic() {
         body: signBody
     };
 
-    console.log(">>> 正在执行容量签到任务...");
+    console.log(">>> 正在执行两步路容量领取任务...");
     $.post(opts, (err, resp, data) => {
         try {
             if (err) {
-                $.msg($.name, "🚫 网络错误", err);
+                $.msg($.name, "🚫 网络请求失败", err);
             } else {
                 const res = JSON.parse(data);
-                if (res.code == 0 || res.message === "success") {
-                    $.msg($.name, "✅ 领取成功", "已成功扩容 10M。");
-                } else if (data.includes("重复") || data.includes("已经") || res.code == 10001) {
-                    $.msg($.name, "ℹ️ 重复签到", "今日任务已完成。");
+                // 核心逻辑：同时识别 code, errCode 以及 message, errMsg
+                const code = res.code !== undefined ? res.code : res.errCode;
+                const msg = res.message || res.msg || res.errMsg || "";
+
+                if (code == 0 || msg === "success") {
+                    $.msg($.name, "✅ 领取成功", "存储空间已成功扩容 10M。");
+                } else if (code == -2 || msg.includes("重复") || msg.includes("领取失败") || msg.includes("已经")) {
+                    // 将 errCode -2 正确识别为重复领取，避免误报错
+                    $.msg($.name, "ℹ️ 重复签到", "今日容量已领取，请明天再来。");
                 } else {
-                    $.msg($.name, "⚠️ 签到异常", res.message || "请查看日志");
-                    console.log("[两步路] 服务器响应: " + data);
+                    $.msg($.name, "⚠️ 签到异常", msg || "请查看控制台日志");
+                    console.log(`[两步路] 服务器响应详情: ${data}`);
                 }
             }
         } catch (e) {
-            $.msg($.name, "❌ 响应解析失败", "非 JSON 格式数据");
-            console.log("[两步路] 原始返回: " + data);
+            $.msg($.name, "❌ 响应解析异常", "非 JSON 数据返回，可能凭证已失效。");
+            console.log(`[两步路] 返回数据原文: ${data}`);
         }
         $.done();
     });
 }
 
-// ---------------------- Env 环境类 (对齐长城脚本样式) ----------------------
+// -------------------------------------------------------
+// ⚙️ Env 环境类 (单文件无依赖极简版)
+// -------------------------------------------------------
 function Env(t, e) {
     return new class {
         constructor(t, e) {
