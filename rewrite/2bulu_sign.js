@@ -1,105 +1,105 @@
 /*
-项目名称：两步路户外助手 - 存储空间自动签到扩容
-更新说明：专为“签到领取 10M”任务定制，精准抓取 POST 请求体并实现无损重放。
+项目名称：两步路户外助手 - 存储容量签到 (完美克隆版)
+更新说明：精准提取 /dataSpace/claimCapacity 接口，无视 psign 算法，直接克隆完整请求体进行无损回放。
 
 ================ Quantumult X 配置指南 ================
 [MITM]
 hostname = helper.2bulu.com
 
 [rewrite_local]
-^https:\/\/helper\.2bulu\.com\/dataSpace\/claimCapacity url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_space.js
+# 拦截签到领取动作 (在“存储空间管理”页面点击“签到领取”触发)
+^https:\/\/helper\.2bulu\.com\/dataSpace\/claimCapacity url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js
 
 [task_local]
-15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_space.js, tag=两步路空间扩容, enabled=true
+# 每天早上 9:15 执行一次容量领取
+15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js, tag=两步路容量签到, enabled=true
 =======================================================
 */
 
-const $ = new Env("两步路空间扩容");
+const $ = new Env("两步路容量签到");
 
-const KEY_URL = "duoxiong_2bulu_space_url";
-const KEY_HEADERS = "duoxiong_2bulu_space_headers";
-const KEY_BODY = "duoxiong_2bulu_space_body";
+const KEY_URL = "duoxiong_2bulu_url";
+const KEY_HEADERS = "duoxiong_2bulu_headers";
+const KEY_BODY = "duoxiong_2bulu_body";
 
 if (typeof $request !== 'undefined') {
-    CaptureCapacity();
+    CaptureCapacitySign();
 } else {
-    ClaimCapacity();
+    ExecuteCapacitySign();
 }
 
 // -------------------------------------------------------
-// 📡 1. 抓取逻辑 (点击“签到领取”按钮触发)
+// 📡 1. 抓取逻辑 (点击“签到领取”瞬间触发)
 // -------------------------------------------------------
-function CaptureCapacity() {
+function CaptureCapacitySign() {
     const url = $request.url;
-    
-    if (url.includes("claimCapacity")) {
-        const headers = $request.headers;
-        const body = $request.body;
-        
-        if (body) {
-            $.setdata(url, KEY_URL);
-            $.setdata(JSON.stringify(headers), KEY_HEADERS);
-            $.setdata(body, KEY_BODY);
-            
-            $.msg($.name, "✅ 抓取成功", "空间扩容凭证及 Body 已保存，可前往 QX 任务列表手动运行测试！");
-            console.log(`✅ [两步路空间] 抓取 URL: ${url}`);
-            console.log(`✅ [两步路空间] 抓取 Body: ${body}`);
-        } else {
-            console.log("⚠️ [两步路空间] 拦截到请求，但未获取到 Body，请确保开启了 script-request-body");
-        }
+    const headers = $request.headers;
+    const body = $request.body;
+
+    if (url && headers && body) {
+        // 保存克隆三要素：URL(含 psign)、Headers(含 Cookie)、Body(含 authCode)
+        $.setdata(url, KEY_URL);
+        $.setdata(JSON.stringify(headers), KEY_HEADERS);
+        $.setdata(body, KEY_BODY);
+
+        $.msg($.name, "✅ 抓取成功", "已完美克隆容量签到数据包，请前往 QX 手动运行测试！");
+        console.log(`✅ [两步路] 成功捕获 URL: ${url}`);
+        console.log(`✅ [两步路] 成功捕获 Body: ${body}`);
+    } else {
+        console.log(`⚠️ [两步路] 抓取失败，缺少必要数据`);
     }
     $done({});
 }
 
 // -------------------------------------------------------
-// 🚀 2. 自动领取逻辑
+// 🚀 2. 无损回放签到逻辑
 // -------------------------------------------------------
-function ClaimCapacity() {
-    const url = $.getdata(KEY_URL);
-    const headersStr = $.getdata(KEY_HEADERS);
-    const body = $.getdata(KEY_BODY);
+function ExecuteCapacitySign() {
+    const savedUrl = $.getdata(KEY_URL);
+    const savedHeadersStr = $.getdata(KEY_HEADERS);
+    const savedBody = $.getdata(KEY_BODY);
 
-    if (!url || !headersStr || !body) {
-        $.msg($.name, "🚫 缺少凭证", "请先在两步路 App 中进入‘存储空间管理’，手动点击一次黄色的‘签到领取’按钮！");
+    if (!savedUrl || !savedHeadersStr || !savedBody) {
+        $.msg($.name, "🚫 缺少数据", "请先前往两步路 App -> 我的 -> 存储空间管理，点击黄色的‘签到领取’按钮进行抓包。");
         $done(); return;
     }
 
-    let baseHeaders = {};
+    let headers = {};
     try {
-        baseHeaders = JSON.parse(headersStr);
-        // 清理冲突 Header，防止报错或乱码
-        delete baseHeaders['Content-Length'];
-        delete baseHeaders['content-length'];
-        delete baseHeaders['Accept-Encoding'];
+        headers = JSON.parse(savedHeadersStr);
+        // 清理可能导致强行阻断的 Header，保留 Cookie 和 Encrypt-Type
+        delete headers['Content-Length'];
+        delete headers['content-length'];
+        delete headers['Accept-Encoding'];
     } catch (e) {
-        console.log("❌ [两步路空间] Headers 解析失败");
+        console.log("❌ [两步路] Headers 解析失败");
         $done(); return;
     }
 
-    console.log(">>> 正在执行存储空间领取...");
-    const opts = {
-        url: url,
+    console.log(">>> 正在执行两步路容量领取任务...");
+    
+    const signOpts = {
+        url: savedUrl,
         method: "POST",
-        headers: baseHeaders,
-        body: body
+        headers: headers,
+        body: savedBody
     };
 
-    $task.fetch(opts).then(response => {
+    $task.fetch(signOpts).then(response => {
         try {
             const res = JSON.parse(response.body);
-            // 两步路的扩容接口通常返回 code: 0 为成功
-            if (res.code == 0 || res.success) {
-                $.msg($.name, "✅ 领取成功", `反馈详情: ${res.message || res.msg || "10M 空间已到账！"}`);
-            } else if (response.body.includes("重复") || response.body.includes("已经") || res.code == 500) {
-                // 部分接口重复领取会抛出 500 或特定 message
-                $.msg($.name, "ℹ️ 重复领取", `提示信息: 今日 10M 扩容任务已完成。\n服务器反馈: ${res.message || res.msg}`);
+            // {"code":0, "message":"success", "data":{...}}
+            if (res.code == 0 || res.message === "success") {
+                $.msg($.name, "✅ 领取成功", `恭喜！已成功领取 10M 存储空间。\n服务器反馈: ${res.message || "成功"}`);
+            } else if (response.body.includes("重复") || response.body.includes("已经") || res.code == 10001) {
+                $.msg($.name, "ℹ️ 重复领取", "您今天已经领取过 10M 容量了，明天再来吧！");
             } else {
-                $.msg($.name, "⚠️ 领取异常", res.message || res.msg || "未知状态，请查看日志");
-                console.log(`⚠️ [两步路空间] 报错原文: ${response.body}`);
+                $.msg($.name, "⚠️ 领取反馈", res.message || "未知状态，请查看日志");
+                console.log(`⚠️ [两步路] 异常返回: ${response.body}`);
             }
         } catch (e) {
-            $.msg($.name, "❌ 解析异常", "接口返回非 JSON 数据，请检查网络。");
-            console.log(`❌ [两步路空间] 原始数据: ${response.body}`);
+            $.msg($.name, "❌ 解析异常", "接口返回格式错误，可能认证失效。");
+            console.log(`❌ [两步路] 原始响应数据: ${response.body}`);
         }
         $done();
     }, reason => {
