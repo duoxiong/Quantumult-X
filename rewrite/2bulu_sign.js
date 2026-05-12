@@ -1,31 +1,32 @@
 /*
-项目名称：两步路户外助手 - 存储容量签到 (自动抓取+兜底版)
-项目功能：每日自动领取 10M 存储空间。
+项目名称：两步路户外助手 - 双效签到 (容量+绿豆)
+项目功能：每日自动领取 10M 存储空间 + 签到领取绿豆。
 更新说明：
-1. 兼容两步路特有的 errCode 响应机制，解决 -2 报错提示。
-2. 支持自动抓取：App 内点击“签到领取”即可自动同步最新凭证。
-3. 预设硬编码兜底：内置 5月11日 抓取的有效数据，更新即用。
+1. 新增“签到领绿豆” GET 接口，实现多任务并发。
+2. 采用异步队列执行，双任务结果合并推送，避免通知刷屏。
+3. 内置最新抓包双兜底数据，彻底免抓包即跑。
 
 ================ Quantumult X 配置指南 ================
 [MITM]
 hostname = helper.2bulu.com
 
 [rewrite_local]
-# 核心抓取规则：拦截领取容量的 POST 请求
-^https:\/\/helper\.2bulu\.com\/dataSpace\/claimCapacity url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js
+# 拦截扩容与绿豆签到请求 (支持自动更新凭证)
+^https:\/\/helper\.2bulu\.com\/(dataSpace\/claimCapacity|signIn) url script-request-body https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js
 
 [task_local]
-# 每天早上 9:15 执行一次
-15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js, tag=两步路容量签到, enabled=true
+# 每天早上 9:15 执行双效签到
+15 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/2bulu_sign.js, tag=两步路双签, enabled=true
 =======================================================
 */
 
-const $ = new Env("两步路容量签到");
+const $ = new Env("两步路双签到");
 
 // ---------------------- 存储键名 ----------------------
-const KEY_URL = "duoxiong_2bulu_capacity_url";
-const KEY_HEADERS = "duoxiong_2bulu_capacity_headers";
-const KEY_BODY = "duoxiong_2bulu_capacity_body";
+const KEY_HEADERS = "duoxiong_2bulu_headers";
+const KEY_CAPACITY_URL = "duoxiong_2bulu_cap_url";
+const KEY_CAPACITY_BODY = "duoxiong_2bulu_cap_body";
+const KEY_GREENPEA_URL = "duoxiong_2bulu_pea_url";
 
 // -------------------------------------------------------
 // 🚦 逻辑入口
@@ -33,96 +34,135 @@ const KEY_BODY = "duoxiong_2bulu_capacity_body";
 if (typeof $request !== 'undefined') {
     CaptureLogic();
 } else {
-    SignInLogic();
+    // 异步执行双任务
+    (async () => {
+        await SignInLogic();
+    })().catch((e) => console.log(e)).finally(() => $.done());
 }
 
 // -------------------------------------------------------
-// 📡 1. 自动抓取逻辑 (点击“签到领取”触发)
+// 📡 1. 自动抓取逻辑 (分别捕获两个接口)
 // -------------------------------------------------------
 function CaptureLogic() {
     const url = $request.url;
     const headers = $request.headers;
-    const body = $request.body;
+    const body = $request.body || "";
 
-    if (url.indexOf("claimCapacity") > -1 && body) {
-        $.setdata(url, KEY_URL);
-        $.setdata(JSON.stringify(headers), KEY_HEADERS);
-        $.setdata(body, KEY_BODY);
+    // 抓取 Headers (两接口通用)
+    if (headers) $.setdata(JSON.stringify(headers), KEY_HEADERS);
 
-        $.msg($.name, "✅ 抓取成功", "已锁定存储扩容接口，后续将按此凭证自动运行。");
-        console.log(`[两步路] 成功捕获 URL: ${url}`);
-        console.log(`[两步路] 成功捕获 Body: ${body}`);
+    if (url.indexOf("/dataSpace/claimCapacity") > -1 && body) {
+        $.setdata(url, KEY_CAPACITY_URL);
+        $.setdata(body, KEY_CAPACITY_BODY);
+        $.msg($.name, "✅ 容量抓取成功", "已锁定存储扩容接口");
+        console.log(`[两步路] 捕获容量 URL: ${url}`);
+    } else if (url.indexOf("/signIn?") > -1) {
+        $.setdata(url, KEY_GREENPEA_URL);
+        $.msg($.name, "✅ 绿豆抓取成功", "已锁定签到领绿豆接口");
+        console.log(`[两步路] 捕获绿豆 URL: ${url}`);
     }
     $.done();
 }
 
 // -------------------------------------------------------
-// 🚀 2. 签到执行逻辑
+// 🚀 2. 双效签到执行逻辑
 // -------------------------------------------------------
-function SignInLogic() {
-    // 优先从本地存储读取抓取到的数据
-    let signUrl = $.getdata(KEY_URL);
-    let signHeadersStr = $.getdata(KEY_HEADERS);
-    let signBody = $.getdata(KEY_BODY);
+async function SignInLogic() {
+    // --- 💡 硬编码兜底数据 (基于抓包数据) ---
+    const defaultHeaders = JSON.stringify({
+        "Host": "helper.2bulu.com",
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "Cookie": "authCode=A0KJFPhCXvchohO3MjeB%2FpCeYxyfqbx1vceit4NyIiG0VIg5eFQu5A%3D%3D; token=uOWVhtWzrcic1PzFlIUZww%3D%3D",
+        "User-Agent": "region:CN;lan:zh-Hans;OutdoorAssistantApplication/9.0.3 (lolaage.2bulu.zhushou; build:9.0.3.0; iOS 18.7.8) Alamofire/5.9.1",
+        "Encrypt-Type": "1",
+        "Accept": "*/*"
+    });
 
-    // --- 💡 硬编码兜底数据 (基于 2026-05-11 抓包数据) ---
-    if (!signUrl) {
-        console.log(">>> 未发现本地抓取数据，启动硬编码兜底程序...");
-        signUrl = "https://helper.2bulu.com/dataSpace/claimCapacity?psign=4c9077afc211b04348b3c0db55e55813";
-        signHeadersStr = JSON.stringify({
-            "Host": "helper.2bulu.com",
-            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "Cookie": "authCode=A0KJFPhCXvchohO3MjeB%2FpCeYxyfqbx1vceit4NyIiG0VIg5eFQu5A%3D%3D; token=uOWVhtWzrcic1PzFlIUZww%3D%3D",
-            "User-Agent": "region:CN;lan:zh-Hans;OutdoorAssistantApplication/9.0.2 (lolaage.2bulu.zhushou; build:9.0.2.5; iOS 18.7.8) Alamofire/5.9.1",
-            "Encrypt-Type": "1",
-            "Accept": "*/*"
-        });
-        signBody = "authCode=f0edb44c794b460aa6f5e3812c93ca2b&authType=1&deviceName=iPhone%2016%20Pro%20Max&p_appVersion=9.0.2&p_productType=0&p_terminalType=3&p_userId=63273918&sdkLevel=18.7.8&taskId=1&userId=63273918";
-    }
-
-    const headers = JSON.parse(signHeadersStr);
-    // 清理动态请求头
+    const capUrl = $.getdata(KEY_CAPACITY_URL) || "https://helper.2bulu.com/dataSpace/claimCapacity?psign=4c9077afc211b04348b3c0db55e55813";
+    const capBody = $.getdata(KEY_CAPACITY_BODY) || "authCode=f0edb44c794b460aa6f5e3812c93ca2b&authType=1&deviceName=iPhone%2016%20Pro%20Max&p_appVersion=9.0.2&p_productType=0&p_terminalType=3&p_userId=63273918&sdkLevel=18.7.8&taskId=1&userId=63273918";
+    const peaUrl = $.getdata(KEY_GREENPEA_URL) || "https://helper.2bulu.com/signIn?deviceName=iPhone%2016%20Pro%20Max&p_appVersion=9.0.3&p_productType=0&p_terminalType=3&p_userId=63273918&sdkLevel=18.7.8&psign=a8f545f5f0d56c2cea8963c68322e970";
+    
+    let headersStr = $.getdata(KEY_HEADERS) || defaultHeaders;
+    let headers = JSON.parse(headersStr);
     delete headers['Content-Length'];
     delete headers['content-length'];
 
-    const opts = {
-        url: signUrl,
-        method: "POST",
-        headers: headers,
-        body: signBody
-    };
+    let resultMsg = "";
 
-    console.log(">>> 正在执行两步路容量领取任务...");
-    $.post(opts, (err, resp, data) => {
+    // ==========================================
+    // 🚶‍♂️ 任务一：领取存储容量 (POST)
+    // ==========================================
+    console.log(">>> 开始执行任务一：领取容量...");
+    let res1 = await requestAsync({ url: capUrl, method: "POST", headers: headers, body: capBody });
+    if (res1.err) {
+        resultMsg += `🔴 容量: 网络请求失败\n`;
+    } else {
         try {
-            if (err) {
-                $.msg($.name, "🚫 网络请求失败", err);
+            let data1 = JSON.parse(res1.data);
+            let code1 = data1.code !== undefined ? data1.code : data1.errCode;
+            let msg1 = data1.message || data1.msg || data1.errMsg || "";
+            if (code1 == 0 || msg1 === "success") {
+                resultMsg += `🟢 容量: 领取成功 (+10M)\n`;
+            } else if (code1 == -2 || msg1.includes("重复") || msg1.includes("失败")) {
+                resultMsg += `⚪️ 容量: 今日已领取\n`;
             } else {
-                const res = JSON.parse(data);
-                // 核心逻辑：同时识别 code, errCode 以及 message, errMsg
-                const code = res.code !== undefined ? res.code : res.errCode;
-                const msg = res.message || res.msg || res.errMsg || "";
-
-                if (code == 0 || msg === "success") {
-                    $.msg($.name, "✅ 领取成功", "存储空间已成功扩容 10M。");
-                } else if (code == -2 || msg.includes("重复") || msg.includes("领取失败") || msg.includes("已经")) {
-                    // 将 errCode -2 正确识别为重复领取，避免误报错
-                    $.msg($.name, "ℹ️ 重复签到", "今日容量已领取，请明天再来。");
-                } else {
-                    $.msg($.name, "⚠️ 签到异常", msg || "请查看控制台日志");
-                    console.log(`[两步路] 服务器响应详情: ${data}`);
-                }
+                resultMsg += `⚠️ 容量: 异常 (${msg1})\n`;
             }
         } catch (e) {
-            $.msg($.name, "❌ 响应解析异常", "非 JSON 数据返回，可能凭证已失效。");
-            console.log(`[两步路] 返回数据原文: ${data}`);
+            resultMsg += `🔴 容量: 解析失败\n`;
         }
-        $.done();
+    }
+
+    // ==========================================
+    // 🚶‍♂️ 任务二：签到领绿豆 (GET)
+    // ==========================================
+    console.log(">>> 开始执行任务二：签到领绿豆...");
+    // GET 请求必须去除 Content-Type，防止报错
+    let peaHeaders = Object.assign({}, headers);
+    delete peaHeaders['Content-Type'];
+
+    let res2 = await requestAsync({ url: peaUrl, method: "GET", headers: peaHeaders });
+    if (res2.err) {
+        resultMsg += `🔴 绿豆: 网络请求失败\n`;
+    } else {
+        try {
+            let data2 = JSON.parse(res2.data);
+            let code2 = data2.code !== undefined ? data2.code : data2.errCode;
+            let msg2 = data2.message || data2.msg || data2.errMsg || "";
+            // 依据抓包数据，成功返回 errCode 0 并且带有 amount
+            if (code2 == 0 || msg2 === "success" || data2.amount !== undefined) {
+                resultMsg += `🟢 绿豆: 签到成功 (+${data2.amount || '*'}豆)\n`;
+            } else if (code2 == -2 || msg2.includes("重复") || msg2.includes("已经")) {
+                resultMsg += `⚪️ 绿豆: 今日已签到\n`;
+            } else {
+                resultMsg += `⚠️ 绿豆: 异常 (${msg2})\n`;
+            }
+        } catch (e) {
+            resultMsg += `🔴 绿豆: 解析失败\n`;
+        }
+    }
+
+    // ==========================================
+    // 📢 推送最终合并通知
+    // ==========================================
+    $.msg($.name, "双效任务执行完毕", resultMsg.trim());
+}
+
+// -------------------------------------------------------
+// 🛠 工具函数：Promise 封装网络请求
+// -------------------------------------------------------
+function requestAsync(opts) {
+    return new Promise((resolve) => {
+        if (opts.method === 'GET') {
+            $.get(opts, (err, resp, data) => resolve({ err, resp, data }));
+        } else {
+            $.post(opts, (err, resp, data) => resolve({ err, resp, data }));
+        }
     });
 }
 
 // -------------------------------------------------------
-// ⚙️ Env 环境类 (单文件无依赖极简版)
+// ⚙️ Env 环境类
 // -------------------------------------------------------
 function Env(t, e) {
     return new class {
@@ -133,6 +173,15 @@ function Env(t, e) {
         getdata(t) { return this.isQuanX() ? $prefs.valueForKey(t) : null }
         setdata(t, e) { return this.isQuanX() ? $prefs.setValueForKey(t, e) : null }
         msg(t = this.name, e = "", s = "") { this.isQuanX() && $notify(t, e, s) }
+        get(t, e = (() => { })) {
+            if (this.isQuanX()) {
+                t.method = "GET";
+                $task.fetch(t).then(t => {
+                    const { statusCode: s, headers: r, body: o } = t;
+                    e(null, { status: s, headers: r, body: o }, o)
+                }, t => e(t && t.error || "UndefinedError"))
+            }
+        }
         post(t, e = (() => { })) {
             if (this.isQuanX()) {
                 t.method = "POST";
