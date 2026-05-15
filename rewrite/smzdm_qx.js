@@ -1,6 +1,7 @@
 /*
 什么值得买自动签到 (完美适配引用资源订阅)
 
+
 [rewrite_local]
 # 1. 获取 Cookie (打开 App 自动触发)
 ^https?:\/\/user-api\.smzdm\.com\/.* url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/smzdm_sign.js
