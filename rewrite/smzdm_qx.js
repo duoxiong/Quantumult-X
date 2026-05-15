@@ -1,24 +1,27 @@
 /*
+什么值得买自动签到 (完美适配引用资源订阅)
+
 [rewrite_local]
-# 获取什么值得买 Cookie (打开 App 自动触发)
-^https?:\/\/user-api\.smzdm\.com\/.* url script-request-header smzdm_env.js
+# 1. 获取 Cookie (打开 App 自动触发)
+^https?:\/\/user-api\.smzdm\.com\/.* url script-request-header https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/smzdm_sign.js
 
 [task_local]
-# 定时签到 (每天早上 9:00 执行一次)
-0 9 * * * smzdm_env.js, tag=什么值得买签到, img-url=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/smzdm.png, enabled=true
+# 2. 定时签到 (每天早上 9:00 执行)
+0 9 * * * https://raw.githubusercontent.com/duoxiong/Quantumult-X/refs/heads/main/rewrite/smzdm_sign.js, tag=什么值得买签到, img-url=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/smzdm.png, enabled=true
 
-[MITM]
+[mitm]
 hostname = user-api.smzdm.com
 */
 
 const $ = new Env("什么值得买");
 const cookieKey = "smzdm_cookie_qx";
 
+// 🚦 逻辑入口
 !(async () => {
     if (typeof $request !== "undefined") {
-        getCookie();
+        GetCookie();
     } else {
-        await checkIn();
+        await SignIn();
     }
 })()
 .catch((e) => {
@@ -28,33 +31,34 @@ const cookieKey = "smzdm_cookie_qx";
     $.done();
 });
 
-// ==========================================
-// 1. 获取 Cookie
-// ==========================================
-function getCookie() {
+// -------------------------------------------------------
+// 📡 1. 抓取逻辑
+// -------------------------------------------------------
+function GetCookie() {
     if ($request && $request.headers) {
         const headers = $request.headers;
+        // 兼容不同平台和应用可能产生的大小写问题
         const cookie = headers["Cookie"] || headers["cookie"];
         
         if (cookie && cookie.indexOf("sess=") !== -1) {
             const currentCookie = $.getdata(cookieKey);
             if (currentCookie !== cookie) {
                 $.setdata(cookie, cookieKey);
-                $.msg($.name, "获取 Cookie 成功 🎉", "已保存到本地，请关闭重写规则并设置定时任务。");
-                $.log(`获取 Cookie 成功: ${cookie}`);
+                $.msg($.name, "🎉 抓取成功", "Cookie已保存！脚本将自动运行，请关闭重写规则。");
+                $.log(`✅ 抓取成功: ${cookie}`);
             }
         }
     }
 }
 
-// ==========================================
-// 2. 签到逻辑
-// ==========================================
-function checkIn() {
+// -------------------------------------------------------
+// 🚀 2. 签到逻辑
+// -------------------------------------------------------
+function SignIn() {
     return new Promise((resolve) => {
         const cookie = $.getdata(cookieKey);
         if (!cookie) {
-            $.msg($.name, "签到失败 ❌", "未找到 Cookie，请先开启 Rewrite 规则并打开 App 获取！");
+            $.msg($.name, "🚫 未获取 Cookie", "请先开启 Rewrite 规则并打开 App 获取！");
             resolve();
             return;
         }
@@ -72,26 +76,26 @@ function checkIn() {
             try {
                 if (err) {
                     $.log(`签到请求失败: ${err}`);
-                    $.msg($.name, "网络请求失败 ❌", err);
+                    $.msg($.name, "🚫 网络错误", err);
                 } else {
                     const result = JSON.parse(data);
                     if (result.error_code === 0) {
                         const days = result.data.checkin_num || "未知";
                         const gold = result.data.gold || "0";
                         const exp = result.data.exp || "0";
-                        $.msg($.name, "签到成功 ✅", `连续签到: ${days}天\n获得奖励: ${gold}金币 | ${exp}经验`);
+                        $.msg($.name, "✅ 签到成功", `连续签到: ${days}天\n奖励: ${gold}金币 | ${exp}经验`);
                         $.log(`签到成功: 连续 ${days} 天, 奖励 ${gold}金币`);
                     } else if (result.error_msg && result.error_msg.includes("已经签到")) {
-                        $.msg($.name, "今日已签到 ⚠️", "今天已经签过到了，明天再来吧！");
+                        $.msg($.name, "ℹ️ 重复签到", "今日任务已完成");
                         $.log("重复签到: 今日已完成签到");
                     } else {
-                        $.msg($.name, "签到失败 ❌", `错误信息: ${result.error_msg || "未知错误"}`);
+                        $.msg($.name, "⚠️ 签到反馈", result.error_msg || "未知错误");
                         $.log(`签到失败: ${data}`);
                     }
                 }
             } catch (e) {
                 $.logErr(e, resp);
-                $.msg($.name, "解析异常 ❌", "返回数据解析失败，可能是 Cookie 失效。");
+                $.msg($.name, "❌ 异常", "响应非 JSON 格式或 Cookie 失效。");
             } finally {
                 resolve();
             }
@@ -99,14 +103,12 @@ function checkIn() {
     });
 }
 
-// ==========================================
-// Env 底层环境 (已优化排版防止显示崩溃)
-// ==========================================
+// -------------------------------------------------------
+// ⚙️ 底层环境 Env
+// -------------------------------------------------------
 function Env(name, opts) {
     class Http {
-        constructor(env) {
-            this.env = env;
-        }
+        constructor(env) { this.env = env; }
         send(opts, method = "GET") {
             opts = typeof opts === "string" ? { url: opts } : opts;
             let sender = this.get;
